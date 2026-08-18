@@ -84,8 +84,15 @@ def project_reference(entries: List[dict], new_floor: float
 
 
 def costs_summary(entries: List[dict]) -> dict:
+    """Phase 3-2: GPU minutes, labels consumed, and validation load."""
     tr = sum(e.get("train_minutes") or 0 for e in entries)
     ev = sum(e.get("eval_minutes") or 0 for e in entries)
+    lb = sum(e.get("gold_labels_consumed") or 0 for e in entries)
+    tq = sum(e.get("teacher_queries") or 0 for e in entries)
+    va = sum(e.get("validation_items") or 0 for e in entries)
     return {"episodes": len({e.get("target") for e in entries if e.get("target")}),
             "train_gpu_minutes": round(tr, 1),
-            "eval_gpu_minutes": round(ev, 1)}
+            "eval_gpu_minutes": round(ev, 1),
+            "gold_labels_consumed": lb,
+            "teacher_queries": tq,
+            "validation_items": va}

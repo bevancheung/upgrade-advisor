@@ -74,9 +74,13 @@ def evaluate(model_path, data_path, out_records, task_kind="classification",
              "Answer with the required output only.", plain=False, bs=16,
              max_new=32, limit=0, comparator=None, quant4bit=True,
              shots=None):
+    os.environ.setdefault("HF_HUB_DISABLE_PROGRESS_BARS", "1")
     import torch
     from transformers import (AutoModelForCausalLM, AutoTokenizer,
                               BitsAndBytesConfig)
+    from transformers.utils import logging as hf_logging
+    hf_logging.set_verbosity_error()
+    hf_logging.disable_progress_bar()
 
     items = load_jsonl(data_path)
     if limit:

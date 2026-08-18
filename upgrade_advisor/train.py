@@ -44,6 +44,7 @@ def _build_example(tok, item, max_len, system_default, plain):
 def train(base_model, train_path, out_dir, system_default, plain=False,
           max_len=256, epochs=3, lr=2e-4, batch=16, grad_accum=1,
           lora_r=16, seed=42):
+    os.environ.setdefault("HF_HUB_DISABLE_PROGRESS_BARS", "1")
     import torch
     from torch.utils.data import Dataset
     from transformers import (AutoModelForCausalLM, AutoTokenizer,

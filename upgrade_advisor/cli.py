@@ -302,7 +302,8 @@ def cmd_recommend(args):
                                if m.reference_is_estimate else None),
         "copy": (round(m.copy_score, 4) if m.copy_score is not None else None),
         "train_minutes": _train_minutes(wd),
-        "eval_minutes": _sum_eval_minutes(wd)})
+        "eval_minutes": _sum_eval_minutes(wd),
+        "validation_items": n_gate})
     cs = L.costs_summary(L.history(c["workdir"]))
     rec.evidence["ledger"] = cs
     out = render_report(c, args.target, ver, m, rec)
@@ -331,12 +332,24 @@ def cmd_retrain(args):
              plain=c.get("plain_format", False),
              comparator=_comparator(c, args.config),
              out_records=os.path.join(wd, "reference.jsonl"))
+    val_n = 0
     if c.get("val_set"):
-        evaluate(args.target, adapter=out_dir, data_path=c["val_set"],
-                 task_kind=c["task_kind"], system_default=c["system_prompt"],
-                 plain=c.get("plain_format", False),
-                 comparator=_comparator(c, args.config),
-                 out_records=os.path.join(wd, "reference_val.jsonl"))
+        vs = evaluate(args.target, adapter=out_dir, data_path=c["val_set"],
+                      task_kind=c["task_kind"],
+                      system_default=c["system_prompt"],
+                      plain=c.get("plain_format", False),
+                      comparator=_comparator(c, args.config),
+                      out_records=os.path.join(wd, "reference_val.jsonl"))
+        val_n = vs["n"]
+    tl = json.load(open(os.path.join(out_dir, "train_log.json"),
+                        encoding="utf-8"))
+    n_labels = sum(1 for _ in open(args.train_set or c.get("train_set"),
+                                   encoding="utf-8"))
+    L.append(c["workdir"], {
+        "event": "retrain", "target": args.target, "task": c["task_name"],
+        "train_minutes": tl.get("wall_clock_min"),
+        "gold_labels_consumed": n_labels, "teacher_queries": 0,
+        "validation_items": val_n})
     print(f"reference trained and scored; rerun `upgrade-advisor recommend`")
 
 
@@ -363,12 +376,24 @@ def cmd_refresh(args):
              plain=c.get("plain_format", False),
              comparator=_comparator(c, args.config),
              out_records=os.path.join(wd, "refresh.jsonl"))
+    val_n = 0
     if c.get("val_set"):
-        evaluate(args.target, adapter=out_dir, data_path=c["val_set"],
-                 task_kind=c["task_kind"], system_default=c["system_prompt"],
-                 plain=c.get("plain_format", False),
-                 comparator=_comparator(c, args.config),
-                 out_records=os.path.join(wd, "refresh_val.jsonl"))
+        vs = evaluate(args.target, adapter=out_dir, data_path=c["val_set"],
+                      task_kind=c["task_kind"],
+                      system_default=c["system_prompt"],
+                      plain=c.get("plain_format", False),
+                      comparator=_comparator(c, args.config),
+                      out_records=os.path.join(wd, "refresh_val.jsonl"))
+        val_n = vs["n"]
+    tl = json.load(open(os.path.join(out_dir, "train_log.json"),
+                        encoding="utf-8"))
+    n_inputs = sum(1 for _ in open(args.inputs or c.get("train_set"),
+                                   encoding="utf-8"))
+    L.append(c["workdir"], {
+        "event": "refresh", "target": args.target, "task": c["task_name"],
+        "train_minutes": tl.get("wall_clock_min"),
+        "gold_labels_consumed": 0, "teacher_queries": n_inputs,
+        "validation_items": val_n})
     print(f"refresh student trained and scored; rerun `upgrade-advisor recommend`")
 
 

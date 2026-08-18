@@ -49,7 +49,10 @@ def render_report(cfg, target, verdict, m, rec):
         a("")
         a(f"## Task ledger: {led['episodes']} episode(s), "
           f"{led['train_gpu_minutes']} train GPU-min, "
-          f"{led['eval_gpu_minutes']} eval GPU-min accumulated")
+          f"{led['eval_gpu_minutes']} eval GPU-min, "
+          f"{led.get('gold_labels_consumed', 0)} gold labels, "
+          f"{led.get('teacher_queries', 0)} teacher queries, "
+          f"{led.get('validation_items', 0)} validation items accumulated")
     a("")
     a("## Reasoning")
     for x in rec.reasons:
