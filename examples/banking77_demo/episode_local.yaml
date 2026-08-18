@@ -1,0 +1,12 @@
+task_name: banking77_demo
+task_kind: classification
+test_set: E:\dataset\processed\banking77\test.jsonl
+val_set: null
+system_prompt: "You are an intent classification specialist for a retail bank's customer support. Classify the customer query into exactly one intent label. Respond with the label only."
+source_base: E:\dataset\models\Qwen2.5-7B-Instruct
+adapter: E:\dataset\experts\banking77__qwen2.5-7b-instruct
+plain_format: false
+inputs_retained: true
+gold_labels_retained: true
+flip_budget: 0.03
+workdir: runs/banking77
