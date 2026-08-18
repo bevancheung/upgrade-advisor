@@ -22,6 +22,11 @@ class GenealogyVerdict:
     note: str = ""
 
 
+def _tok(v):
+    """YAML 的 2.0e10（无+号）会被解析成字符串；统一转 float。"""
+    return None if v is None else float(v)
+
+
 def _load(path: str = REGISTRY) -> dict:
     with open(path, encoding="utf-8") as f:
         return yaml.safe_load(f)
@@ -46,7 +51,7 @@ def lookup(source: str, target: str, registry_path: str = REGISTRY
         e = direct[0]
         return GenealogyVerdict(
             documented_continuation=(e["type"] == "continuation"),
-            continuation_tokens=e.get("continuation_tokens"),
+            continuation_tokens=_tok(e.get("continuation_tokens")),
             edge_type=e["type"], confidence=e.get("confidence", "inferred"),
             note=e.get("note", ""))
     # single-intermediate path search (covers e.g. 237k -> soup via anneal)
@@ -62,8 +67,8 @@ def lookup(source: str, target: str, registry_path: str = REGISTRY
             if types == {"continuation"}:
                 return GenealogyVerdict(
                     True,
-                    (e1.get("continuation_tokens") or 0)
-                    + (e2.get("continuation_tokens") or 0),
+                    (_tok(e1.get("continuation_tokens")) or 0)
+                    + (_tok(e2.get("continuation_tokens")) or 0),
                     "continuation", "verified", "two-hop continuation path")
             return GenealogyVerdict(
                 False, None, "+".join(sorted(types)), "verified",

@@ -25,7 +25,7 @@ edges:
      note: shape-identical but independent run per release docs; measured
            copy retention -0.60..0.78, always below Freeze}
   - {source: Qwen/Qwen2.5-7B-Instruct, target: Qwen/Qwen2.5-7B-Instruct-1M,
-     type: continuation, continuation_tokens: 2.0e10, confidence: inferred,
+     type: continuation, continuation_tokens: 2.0e+10, confidence: inferred,
      note: long-context extension of the same weights; measured copy
            retention 0.82-1.45}
   - {source: Qwen/Qwen2.5-7B-Instruct, target: Qwen/Qwen3-8B,
@@ -38,15 +38,15 @@ edges:
   # OLMo-2 intra-run edges (fully documented trajectory)
   - {source: "allenai/OLMo-2-1124-7B@stage1-step237000",
      target: "allenai/OLMo-2-1124-7B@stage1-step248000",
-     type: continuation, continuation_tokens: 4.6e10, confidence: verified,
+     type: continuation, continuation_tokens: 4.6e+10, confidence: verified,
      note: measured copy retention 0.88-0.99}
   - {source: "allenai/OLMo-2-1124-7B@stage1-step237000",
      target: "allenai/OLMo-2-1124-7B@stage1-step928646",
-     type: continuation, continuation_tokens: 2.9e12, confidence: verified,
+     type: continuation, continuation_tokens: 2.9e+12, confidence: verified,
      note: pure continuation, no anneal/soup; measured copy at the floor}
   - {source: "allenai/OLMo-2-1124-7B@stage1-step928646",
      target: "allenai/OLMo-2-1124-7B@stage2-ingredient3-step11931",
-     type: anneal, continuation_tokens: 5.0e10, confidence: verified}
+     type: anneal, continuation_tokens: 5.0e+10, confidence: verified}
   - {source: "allenai/OLMo-2-1124-7B@stage2-ingredient3-step11931",
      target: "allenai/OLMo-2-1124-7B",
      type: soup, confidence: verified,

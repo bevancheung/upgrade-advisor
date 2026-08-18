@@ -27,6 +27,9 @@ def test_edges_are_well_formed():
         if e["type"] == "continuation":
             assert e.get("continuation_tokens"), \
                 f"continuation edge needs a distance: {e}"
+            assert isinstance(e["continuation_tokens"], (int, float)), \
+                ("continuation_tokens parsed as string -- write YAML "
+                 f"scientific notation with an explicit sign (2.0e+10): {e}")
 
 
 def test_paper_verified_edges_present():

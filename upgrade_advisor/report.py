@@ -25,7 +25,7 @@ def render_report(cfg, target, verdict, m, rec):
         a(f"- refresh student: **{m.refresh_score:.4f}**")
     a(f"- genealogy: {verdict.edge_type} "
       f"({verdict.confidence}); "
-      + (f"continuation {verdict.continuation_tokens/1e9:.0f}B tokens"
+      + (f"continuation {float(verdict.continuation_tokens)/1e9:.0f}B tokens"
          if verdict.continuation_tokens else "distance unknown"))
     if verdict.note:
         a(f"  - {verdict.note}")
