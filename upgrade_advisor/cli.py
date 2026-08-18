@@ -25,6 +25,7 @@ TEMPLATE = """\
 task_name: my_task
 task_kind: classification        # classification | structured
 test_set: data/test.jsonl        # gold-labeled, fixed split
+train_set: data/train.jsonl      # used by `retrain`/`refresh`
 val_set: null                    # optional; gates use test gate-half if null
 system_prompt: "You are a task specialist. Answer with the required output only."
 # adoption floor prompt MUST carry the full task instructions a newcomer needs
@@ -153,6 +154,53 @@ def cmd_recommend(args):
     print(f"\n[report written to {rpt}]")
 
 
+def cmd_retrain(args):
+    """Train the fixed-recipe reference on the target and score it into the
+    episode workdir (reference.jsonl), unlocking the opportunity gate."""
+    from .evaluate import evaluate
+    from .train import train
+    c = _cfg(args.config)
+    wd = _wd(c, args.target)
+    os.makedirs(wd, exist_ok=True)
+    out_dir = args.out or os.path.join(wd, "reference_adapter")
+    train(args.target, args.train_set or c.get("train_set"),
+          out_dir, system_default=c["system_prompt"],
+          plain=c.get("plain_format", False), max_len=args.max_len,
+          epochs=args.epochs)
+    evaluate(args.target, adapter=out_dir, data_path=c["test_set"],
+             task_kind=c["task_kind"], system_default=c["system_prompt"],
+             plain=c.get("plain_format", False),
+             comparator=_comparator(c, args.config),
+             out_records=os.path.join(wd, "reference.jsonl"))
+    print(f"reference trained and scored; rerun `upgrade-advisor recommend`")
+
+
+def cmd_refresh(args):
+    """Annotation-free refresh: current specialist relabels retained inputs,
+    a student trains on the target, and its records land in the workdir."""
+    from .evaluate import evaluate
+    from .train import relabel, train
+    c = _cfg(args.config)
+    wd = _wd(c, args.target)
+    os.makedirs(wd, exist_ok=True)
+    relabeled = os.path.join(wd, "refresh_train.jsonl")
+    relabel(c["source_base"], c["adapter"],
+            args.inputs or c.get("train_set"), relabeled,
+            system_default=c["system_prompt"],
+            plain=c.get("plain_format", False))
+    out_dir = args.out or os.path.join(wd, "refresh_adapter")
+    train(args.target, relabeled, out_dir,
+          system_default=c["system_prompt"],
+          plain=c.get("plain_format", False), max_len=args.max_len,
+          epochs=args.epochs)
+    evaluate(args.target, adapter=out_dir, data_path=c["test_set"],
+             task_kind=c["task_kind"], system_default=c["system_prompt"],
+             plain=c.get("plain_format", False),
+             comparator=_comparator(c, args.config),
+             out_records=os.path.join(wd, "refresh.jsonl"))
+    print(f"refresh student trained and scored; rerun `upgrade-advisor recommend`")
+
+
 def cmd_gate(args):
     c = _cfg(args.config)
     serving = F.load_records(args.serving)
@@ -180,6 +228,17 @@ def main():
                    help="beta-projected reference score if not trained yet")
     p.add_argument("--non-interactive", action="store_true")
     p.set_defaults(f=cmd_recommend)
+    for name, fn in [("retrain", cmd_retrain), ("refresh", cmd_refresh)]:
+        p = sub.add_parser(name); p.add_argument("config")
+        p.add_argument("--target", required=True)
+        p.add_argument("--train-set", dest="train_set", default=None,
+                       help="gold train jsonl (retrain) ")
+        p.add_argument("--inputs", default=None,
+                       help="retained inputs jsonl (refresh)")
+        p.add_argument("--out", default=None)
+        p.add_argument("--max-len", dest="max_len", type=int, default=256)
+        p.add_argument("--epochs", type=float, default=3)
+        p.set_defaults(f=fn)
     p = sub.add_parser("gate"); p.add_argument("config")
     p.add_argument("--serving", required=True, help="records jsonl of serving system")
     p.add_argument("--candidate", required=True)
