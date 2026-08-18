@@ -40,13 +40,26 @@ def norm_structured(s):
     return re.sub(r"\s+", " ", s)
 
 
-def build_prompt(tok, item, system_default, plain):
+def build_prompt(tok, item, system_default, plain, shots=None):
+    """shots: optional few-shot exemplars [{user/text, assistant/label}, ...],
+    fixed across all items and models for comparability."""
     system = item.get("system") or system_default
     user = item.get("user") or item.get("text")
+    shots = shots or []
     if plain:
-        return system + "\n\n" + user + "\nAnswer: "
-    msgs = [{"role": "system", "content": system},
-            {"role": "user", "content": user}]
+        parts = [system, ""]
+        for sh in shots:
+            parts.append((sh.get("user") or sh.get("text"))
+                         + "\nAnswer: " + (sh.get("assistant") or sh.get("label")))
+            parts.append("")
+        parts.append(user + "\nAnswer: ")
+        return "\n".join(parts)
+    msgs = [{"role": "system", "content": system}]
+    for sh in shots:
+        msgs.append({"role": "user", "content": sh.get("user") or sh.get("text")})
+        msgs.append({"role": "assistant",
+                     "content": sh.get("assistant") or sh.get("label")})
+    msgs.append({"role": "user", "content": user})
     try:
         return tok.apply_chat_template(msgs, tokenize=False,
                                        add_generation_prompt=True,
@@ -59,7 +72,8 @@ def build_prompt(tok, item, system_default, plain):
 def evaluate(model_path, data_path, out_records, task_kind="classification",
              adapter=None, system_default="You are a task specialist. "
              "Answer with the required output only.", plain=False, bs=16,
-             max_new=32, limit=0, comparator=None, quant4bit=True):
+             max_new=32, limit=0, comparator=None, quant4bit=True,
+             shots=None):
     import torch
     from transformers import (AutoModelForCausalLM, AutoTokenizer,
                               BitsAndBytesConfig)
@@ -89,7 +103,8 @@ def evaluate(model_path, data_path, out_records, task_kind="classification",
         model = PeftModel.from_pretrained(model, adapter)
     model.eval()
 
-    prompts = [build_prompt(tok, it, system_default, plain) for it in items]
+    prompts = [build_prompt(tok, it, system_default, plain, shots)
+               for it in items]
     if prompts and max(len(p) for p in prompts) > 2500 and bs > 8:
         bs = 8  # KV-cache spill guard (paper appendix, operational note 1)
 

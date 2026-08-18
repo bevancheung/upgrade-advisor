@@ -15,7 +15,11 @@ import re
 
 import yaml
 
+import hashlib
+
 from . import flips as F
+from . import ledger as L
+from . import stats as S
 from . import genealogy as G
 from . import policy as P
 from .report import render_report
@@ -37,6 +41,7 @@ plain_format: false              # true for base (non-instruct) checkpoints
 inputs_retained: true            # unlabeled train inputs kept? (enables REFRESH)
 gold_labels_retained: true
 flip_budget: 0.03                # max negative-flip rate vs serving system
+fewshot_k: 5                     # adoption floor also measured few-shot
 workdir: runs/my_task
 """
 
@@ -62,6 +67,65 @@ def _comparator(cfg, config_path):
     mod = importlib.util.module_from_spec(mod_spec)
     mod_spec.loader.exec_module(mod)
     return getattr(mod, fn)
+
+
+def _shots(cfg, k):
+    if not k or not cfg.get("train_set"):
+        return None
+    import json as _json
+    out = []
+    with open(cfg["train_set"], encoding="utf-8") as f:
+        for line in f:
+            out.append(_json.loads(line))
+            if len(out) >= k:
+                break
+    return out
+
+
+def _sum_eval_minutes(wd):
+    import glob as _glob
+    import json as _json
+    tot = 0.0
+    for p in _glob.glob(os.path.join(wd, "*.summary.json")):
+        tot += _json.load(open(p, encoding="utf-8")).get("minutes") or 0
+    return round(tot, 1)
+
+
+def _train_minutes(wd):
+    import glob as _glob
+    import json as _json
+    tot = 0.0
+    for p in _glob.glob(os.path.join(wd, "*", "train_log.json")):
+        tot += _json.load(open(p, encoding="utf-8")).get("wall_clock_min") or 0
+    return round(tot, 1)
+
+
+def _sha(path):
+    h = hashlib.sha256()
+    with open(path, "rb") as f:
+        for chunk in iter(lambda: f.read(1 << 20), b""):
+            h.update(chunk)
+    return h.hexdigest()
+
+
+def _manifest_path(config_path):
+    return os.path.join(os.path.dirname(os.path.abspath(config_path)),
+                        "data_manifest.json")
+
+
+def _check_manifest(c, config_path, warnings):
+    mp = _manifest_path(config_path)
+    if not os.path.exists(mp):
+        warnings.append("no data_manifest.json -- run `upgrade-advisor "
+                        "manifest` once to pin your splits (Phase 0)")
+        return
+    man = json.load(open(mp, encoding="utf-8"))
+    for key in ("test_set", "train_set", "val_set"):
+        f = c.get(key)
+        if f and f in man and os.path.exists(f) and _sha(f) != man[f]["sha256"]:
+            warnings.append(f"{key} changed since it was pinned in "
+                            "data_manifest.json -- scores are no longer "
+                            "comparable across episodes")
 
 
 def _cfg(path):
@@ -96,19 +160,37 @@ def cmd_measure(args):
     print("[1/3] serving specialist on source base")
     evaluate(c["source_base"], adapter=c["adapter"],
              out_records=os.path.join(wd, "freeze.jsonl"), **common)
-    print("[2/3] target adoption floor (zero-shot, full task instructions)")
+    print("[2/4] target adoption floor (zero-shot, full task instructions)")
     adopt_common = dict(common)
-    adopt_common["system_default"] = c.get("adoption_system_prompt")         or c["system_prompt"]
+    adopt_common["system_default"] = (c.get("adoption_system_prompt")
+                                      or c["system_prompt"])
     evaluate(args.target, adapter=None,
              out_records=os.path.join(wd, "adopt.jsonl"), **adopt_common)
+    shots = _shots(c, c.get("fewshot_k", 0))
+    if shots:
+        print(f"[3/4] adoption floor, {len(shots)}-shot")
+        evaluate(args.target, adapter=None, shots=shots,
+                 out_records=os.path.join(wd, "adopt_fs.jsonl"),
+                 **adopt_common)
     ver = G.lookup(c["source_base"], args.target)
     if ver.documented_continuation and not args.skip_copy:
-        print("[3/3] documented continuation: measuring the copied adapter")
+        print("[4/4] documented continuation: measuring the copied adapter")
         evaluate(args.target, adapter=c["adapter"],
                  out_records=os.path.join(wd, "copy.jsonl"), **common)
     else:
-        print("[3/3] copy not licensed by genealogy; skipped "
+        print("[4/4] copy not licensed by genealogy; skipped "
               f"({ver.edge_type}: {ver.note})")
+    if c.get("val_set"):
+        print("[val] scoring gate set (val_set) for the serving specialist")
+        val_common = dict(common)
+        val_common["data_path"] = c["val_set"]
+        evaluate(c["source_base"], adapter=c["adapter"],
+                 out_records=os.path.join(wd, "freeze_val.jsonl"),
+                 **val_common)
+        if os.path.exists(os.path.join(wd, "copy.jsonl")):
+            evaluate(args.target, adapter=c["adapter"],
+                     out_records=os.path.join(wd, "copy_val.jsonl"),
+                     **val_common)
     print(f"measurements in {wd}; next: upgrade-advisor recommend "
           f"{args.config} --target {args.target}")
 
@@ -120,8 +202,22 @@ def cmd_recommend(args):
     if ver.edge_type == "unknown" and not args.non_interactive:
         ver = G.questionnaire()
 
-    fz, n_gate = _score(os.path.join(wd, "freeze.jsonl"), "gate")
+    use_val = bool(c.get("val_set")) and \
+        os.path.exists(os.path.join(wd, "freeze_val.jsonl"))
+
+    def gate_score(stem):
+        """Gate metrics: full val_set if measured, else test gate-half."""
+        if use_val and os.path.exists(os.path.join(wd, stem + "_val.jsonl")):
+            r = F.load_records(os.path.join(wd, stem + "_val.jsonl"))
+            return sum(r.values()) / len(r), len(r)
+        return _score(os.path.join(wd, stem + ".jsonl"), "gate")
+
+    fz, n_gate = gate_score("freeze")
     ad, _ = _score(os.path.join(wd, "adopt.jsonl"), "gate")
+    fs_p = os.path.join(wd, "adopt_fs.jsonl")
+    if os.path.exists(fs_p):
+        ad_fs, _ = _score(fs_p, "gate")
+        ad = max(ad, ad_fs)
     m = P.Measurements(
         task_kind=c["task_kind"], freeze_score=fz, adopt_floor=ad,
         inputs_retained=c.get("inputs_retained", False),
@@ -129,23 +225,68 @@ def cmd_recommend(args):
         gate_set_size=n_gate, shape_compatible=True,
         documented_continuation=ver.documented_continuation,
         continuation_tokens=ver.continuation_tokens)
+    proj_note = None
     ref_p = os.path.join(wd, "reference.jsonl")
     if os.path.exists(ref_p):
-        m.reference_score, _ = _score(ref_p, "gate")
+        m.reference_score, _ = gate_score("reference")
     elif args.reference_estimate is not None:
         m.reference_score = args.reference_estimate
         m.reference_is_estimate = True
+    else:
+        proj = L.project_reference(L.history(c["workdir"]), ad)
+        if proj:
+            m.reference_score = proj["projected_reference"]
+            m.reference_is_estimate = True
+            proj_note = proj
     cp_p = os.path.join(wd, "copy.jsonl")
     if os.path.exists(cp_p):
-        m.copy_score, _ = _score(cp_p, "gate")
+        m.copy_score, _ = gate_score("copy")
         fr = F.flips(F.load_records(os.path.join(wd, "freeze.jsonl")),
                      F.load_records(cp_p), half="gate")
         m.copy_negative_flip_rate = fr.nfr
     rf_p = os.path.join(wd, "refresh.jsonl")
     if os.path.exists(rf_p):
-        m.refresh_score, _ = _score(rf_p, "gate")
+        m.refresh_score, _ = gate_score("refresh")
 
     rec = P.recommend(m, flip_budget=c.get("flip_budget"))
+    if proj_note:
+        rec.reasons.append(
+            f"reference was beta-projected (beta={proj_note['beta']}, from "
+            f"episodes {proj_note['from_episodes']}); "
+            + proj_note["note"])
+
+    # 统计层：报告半集上的配对 CI 与 McNemar（仅对实测记录）
+    freeze_rec = F.load_records(os.path.join(wd, "freeze.jsonl"))
+    if os.path.exists(ref_p):
+        ref_rec = F.load_records(ref_p)
+        mean, lo, hi = S.paired_diff_ci(ref_rec, freeze_rec)
+        b01, c10, pv = S.mcnemar(ref_rec, freeze_rec)
+        rec.evidence["opportunity_ci_pp"] = [round(lo, 2), round(hi, 2)]
+        rec.evidence["opportunity_mcnemar_p"] = round(pv, 4)
+        for tag, path in [("copy", cp_p), ("refresh", rf_p)]:
+            if os.path.exists(path):
+                other = F.load_records(path)
+                _, lo2, hi2 = S.paired_diff_ci(other, ref_rec)
+                _, _, p2 = S.mcnemar(other, ref_rec)
+                rec.evidence[f"{tag}_vs_reference_ci_pp"] = [round(lo2, 2),
+                                                             round(hi2, 2)]
+                rec.evidence[f"{tag}_vs_reference_p"] = round(p2, 4)
+
+    _check_manifest(c, args.config, rec.warnings)
+    L.append(c["workdir"], {
+        "event": "recommend", "target": args.target,
+        "task": c["task_name"], "action": rec.action.value,
+        "freeze": round(fz, 4), "floor": round(ad, 4),
+        "reference": (round(m.reference_score, 4)
+                      if m.reference_score is not None
+                      and not m.reference_is_estimate else None),
+        "reference_estimate": (round(m.reference_score, 4)
+                               if m.reference_is_estimate else None),
+        "copy": (round(m.copy_score, 4) if m.copy_score is not None else None),
+        "train_minutes": _train_minutes(wd),
+        "eval_minutes": _sum_eval_minutes(wd)})
+    cs = L.costs_summary(L.history(c["workdir"]))
+    rec.evidence["ledger"] = cs
     out = render_report(c, args.target, ver, m, rec)
     rpt = os.path.join(wd, "recommendation.md")
     with open(rpt, "w", encoding="utf-8") as f:
@@ -201,6 +342,22 @@ def cmd_refresh(args):
     print(f"refresh student trained and scored; rerun `upgrade-advisor recommend`")
 
 
+def cmd_manifest(args):
+    """Pin the data splits (sha256 + row counts) next to the episode config;
+    recommend warns whenever a pinned file changes (Phase 0 hygiene)."""
+    c = _cfg(args.config)
+    man = {}
+    for key in ("test_set", "train_set", "val_set"):
+        f = c.get(key)
+        if f and os.path.exists(f):
+            n = sum(1 for _ in open(f, encoding="utf-8"))
+            man[f] = {"sha256": _sha(f), "n": n, "role": key}
+    mp = _manifest_path(args.config)
+    with open(mp, "w", encoding="utf-8") as fp:
+        json.dump(man, fp, ensure_ascii=False, indent=2)
+    print(f"pinned {len(man)} files in {mp}")
+
+
 def cmd_gate(args):
     c = _cfg(args.config)
     serving = F.load_records(args.serving)
@@ -239,6 +396,8 @@ def main():
         p.add_argument("--max-len", dest="max_len", type=int, default=256)
         p.add_argument("--epochs", type=float, default=3)
         p.set_defaults(f=fn)
+    p = sub.add_parser("manifest"); p.add_argument("config")
+    p.set_defaults(f=cmd_manifest)
     p = sub.add_parser("gate"); p.add_argument("config")
     p.add_argument("--serving", required=True, help="records jsonl of serving system")
     p.add_argument("--candidate", required=True)
