@@ -36,7 +36,12 @@ replay; the policy here scored 0.37pp and zero.
 ```bash
 pip install -e .            # core: policy engine, genealogy, flips, report (no GPU)
 pip install -e ".[gpu]"     # + evaluation/probe/training (torch, transformers, peft)
+pip install -e ".[dev]" && pytest tests/   # run the test suite
 ```
+
+Training-class commands (`retrain`, `refresh`, and `measure` on large
+test sets) run for 10+ minutes -- launch them under `nohup`/a job
+runner rather than an interactive shell with a timeout.
 
 ## Quickstart
 

@@ -279,6 +279,12 @@ def cmd_recommend(args):
         b01, c10, pv = S.mcnemar(ref_rec, freeze_rec)
         rec.evidence["opportunity_ci_pp"] = [round(lo, 2), round(hi, 2)]
         rec.evidence["opportunity_mcnemar_p"] = round(pv, 4)
+        if rec.action.value != "freeze" and lo <= 0 <= hi:
+            rec.warnings.append(
+                "the gate passed but the report-half CI for the upgrade "
+                "opportunity includes zero -- the gain is not statistically "
+                "established; consider staying frozen until the next release "
+                "or enlarging the gate set")
         for tag, path in [("copy", cp_p), ("refresh", rf_p)]:
             if os.path.exists(path):
                 other = report_half(path)
