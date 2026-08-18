@@ -11,6 +11,8 @@ import json
 import os
 import sys
 
+import re
+
 import yaml
 
 from . import flips as F
@@ -25,6 +27,9 @@ task_kind: classification        # classification | structured
 test_set: data/test.jsonl        # gold-labeled, fixed split
 val_set: null                    # optional; gates use test gate-half if null
 system_prompt: "You are a task specialist. Answer with the required output only."
+# adoption floor prompt MUST carry the full task instructions a newcomer needs
+# (e.g. the complete label inventory) -- the specialist prompt usually does not:
+adoption_system_prompt: null
 source_base: Qwen/Qwen2.5-7B-Instruct
 adapter: adapters/my_task_lora
 plain_format: false              # true for base (non-instruct) checkpoints
@@ -33,6 +38,12 @@ gold_labels_retained: true
 flip_budget: 0.03                # max negative-flip rate vs serving system
 workdir: runs/my_task
 """
+
+
+def _wd(cfg, target):
+    # sanitize HF ids AND local paths (drive letters would hijack os.path.join)
+    safe = re.sub(r"[\\/:]+", "__", target).strip("_")
+    return os.path.join(cfg["workdir"], safe)
 
 
 def _cfg(path):
@@ -58,7 +69,7 @@ def cmd_init(args):
 def cmd_measure(args):
     from .evaluate import evaluate  # GPU import deferred
     c = _cfg(args.config)
-    wd = os.path.join(c["workdir"], args.target.replace("/", "__"))
+    wd = _wd(c, args.target)
     os.makedirs(wd, exist_ok=True)
     plain = c.get("plain_format", False)
     common = dict(data_path=c["test_set"], task_kind=c["task_kind"],
@@ -66,9 +77,11 @@ def cmd_measure(args):
     print("[1/3] serving specialist on source base")
     evaluate(c["source_base"], adapter=c["adapter"],
              out_records=os.path.join(wd, "freeze.jsonl"), **common)
-    print("[2/3] target adoption floor (zero-shot)")
+    print("[2/3] target adoption floor (zero-shot, full task instructions)")
+    adopt_common = dict(common)
+    adopt_common["system_default"] = c.get("adoption_system_prompt")         or c["system_prompt"]
     evaluate(args.target, adapter=None,
-             out_records=os.path.join(wd, "adopt.jsonl"), **common)
+             out_records=os.path.join(wd, "adopt.jsonl"), **adopt_common)
     ver = G.lookup(c["source_base"], args.target)
     if ver.documented_continuation and not args.skip_copy:
         print("[3/3] documented continuation: measuring the copied adapter")
@@ -83,7 +96,7 @@ def cmd_measure(args):
 
 def cmd_recommend(args):
     c = _cfg(args.config)
-    wd = os.path.join(c["workdir"], args.target.replace("/", "__"))
+    wd = _wd(c, args.target)
     ver = G.lookup(c["source_base"], args.target)
     if ver.edge_type == "unknown" and not args.non_interactive:
         ver = G.questionnaire()
