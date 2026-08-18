@@ -1,0 +1,19 @@
+# Structured-generation episode with a pluggable comparator.
+# Text-to-SQL was the paper's highest-coupling task (beta = 1.49): its
+# reference score rises with new bases, so expect RETRAIN/REFRESH far more
+# often than on classification tasks -- and expect small label budgets to
+# buy nothing (95% of the gain needed >4096 labels).
+task_name: text2sql_demo
+task_kind: structured            # -> epsilon 2pp
+test_set: data/test.jsonl        # {"id","db_id","system","user","assistant"}
+val_set: null
+system_prompt: "You are a text-to-SQL specialist. Given a database schema and a question, write exactly one SQLite query that answers the question. Output only the SQL query, nothing else."
+adoption_system_prompt: null     # same instructions work zero-shot here
+comparator: comparator.py::compare
+source_base: Qwen/Qwen2.5-7B-Instruct
+adapter: adapters/text2sql_lora
+plain_format: false
+inputs_retained: true
+gold_labels_retained: true
+flip_budget: 0.05                # structured tasks churn more (paper: 4-7%)
+workdir: runs/text2sql

@@ -46,6 +46,23 @@ def _wd(cfg, target):
     return os.path.join(cfg["workdir"], safe)
 
 
+def _comparator(cfg, config_path):
+    """Load optional custom comparator "file.py::func" (relative to config)."""
+    spec = cfg.get("comparator")
+    if not spec:
+        return None
+    import importlib.util
+    fpath, fn = spec.split("::")
+    if not os.path.isabs(fpath):
+        fpath = os.path.join(os.path.dirname(os.path.abspath(config_path)),
+                             fpath)
+    mod_spec = importlib.util.spec_from_file_location("episode_comparator",
+                                                      fpath)
+    mod = importlib.util.module_from_spec(mod_spec)
+    mod_spec.loader.exec_module(mod)
+    return getattr(mod, fn)
+
+
 def _cfg(path):
     with open(path, encoding="utf-8") as f:
         return yaml.safe_load(f)
@@ -73,7 +90,8 @@ def cmd_measure(args):
     os.makedirs(wd, exist_ok=True)
     plain = c.get("plain_format", False)
     common = dict(data_path=c["test_set"], task_kind=c["task_kind"],
-                  system_default=c["system_prompt"], plain=plain)
+                  system_default=c["system_prompt"], plain=plain,
+                  comparator=_comparator(c, args.config))
     print("[1/3] serving specialist on source base")
     evaluate(c["source_base"], adapter=c["adapter"],
              out_records=os.path.join(wd, "freeze.jsonl"), **common)
