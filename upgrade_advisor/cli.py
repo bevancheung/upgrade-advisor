@@ -157,7 +157,7 @@ def cmd_measure(args):
     common = dict(data_path=c["test_set"], task_kind=c["task_kind"],
                   system_default=c["system_prompt"], plain=plain,
                   comparator=_comparator(c, args.config))
-    print("[1/3] serving specialist on source base")
+    print("[1/4] serving specialist on source base")
     evaluate(c["source_base"], adapter=c["adapter"],
              out_records=os.path.join(wd, "freeze.jsonl"), **common)
     print("[2/4] target adoption floor (zero-shot, full task instructions)")

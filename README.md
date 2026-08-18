@@ -52,7 +52,18 @@ upgrade-advisor recommend my_task.yaml --target Qwen/Qwen3-8B
 
 # 4. Before serving whatever you built — behavioral regression gate:
 upgrade-advisor gate my_task.yaml --candidate outputs/new_adapter
+
+# supporting commands:
+upgrade-advisor manifest my_task.yaml    # pin split hashes (Phase 0)
+upgrade-advisor retrain  my_task.yaml --target ...   # reference on target
+upgrade-advisor refresh  my_task.yaml --target ...   # annotation-free student
 ```
+
+Reports carry paired bootstrap CIs and exact McNemar p-values for every
+measured comparison, and each episode appends to a per-task ledger
+(floors, references, costs); after two-plus releases the ledger estimates
+the task coupling (beta) and projects the reference for a new target
+before you pay for retraining.
 
 `recommend` never deploys anything. It prints the action, the measured
 evidence behind it (floors, margins, genealogy verdict, flip rates), the
