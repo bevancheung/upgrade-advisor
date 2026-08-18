@@ -66,9 +66,10 @@ the task coupling (beta) and projects the reference for a new target
 before you pay for retraining.
 
 `recommend` never deploys anything. It prints the action, the measured
-evidence behind it (floors, margins, genealogy verdict, flip rates), the
-estimated cost of each alternative, and writes a Markdown report you can put
-in a design review.
+evidence behind it (floors, margins, genealogy verdict, flip rates, paired
+CIs and McNemar p-values on the held-out report half), plus the task's
+cumulative episode costs from the ledger, and writes a Markdown report you
+can put in a design review.
 
 ## What you need to provide
 

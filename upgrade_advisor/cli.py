@@ -70,15 +70,21 @@ def _comparator(cfg, config_path):
 
 
 def _shots(cfg, k):
+    """k exemplars stride-sampled across the whole train file (deterministic,
+    robust to label-sorted files)."""
     if not k or not cfg.get("train_set"):
         return None
     import json as _json
-    out = []
     with open(cfg["train_set"], encoding="utf-8") as f:
-        for line in f:
-            out.append(_json.loads(line))
-            if len(out) >= k:
-                break
+        rows = [_json.loads(line) for line in f if line.strip()]
+    if not rows:
+        return None
+    step = max(1, len(rows) // k)
+    out = [rows[i * step] for i in range(min(k, len(rows)))]
+    labels = {r.get("assistant") or r.get("label") for r in out}
+    if cfg.get("task_kind") == "classification" and len(labels) < min(k, 3):
+        print(f"[warn] few-shot exemplars cover only {len(labels)} distinct "
+              "labels; consider a shuffled train file")
     return out
 
 
@@ -202,18 +208,24 @@ def cmd_recommend(args):
     if ver.edge_type == "unknown" and not args.non_interactive:
         ver = G.questionnaire()
 
-    use_val = bool(c.get("val_set")) and \
-        os.path.exists(os.path.join(wd, "freeze_val.jsonl"))
+    # val 只在"每个参与门控的条件都有 _val 记录"时启用；
+    # 否则全部退回测试集门控半，绝不在同一比较里混用两个样本集。
+    stems_present = [st for st in ("freeze", "reference", "copy", "refresh")
+                     if os.path.exists(os.path.join(wd, st + ".jsonl"))]
+    use_val = bool(c.get("val_set")) and all(
+        os.path.exists(os.path.join(wd, st + "_val.jsonl"))
+        for st in stems_present)
 
     def gate_score(stem):
-        """Gate metrics: full val_set if measured, else test gate-half."""
-        if use_val and os.path.exists(os.path.join(wd, stem + "_val.jsonl")):
+        """Gate metrics: full val_set (if complete), else test gate-half."""
+        if use_val:
             r = F.load_records(os.path.join(wd, stem + "_val.jsonl"))
             return sum(r.values()) / len(r), len(r)
         return _score(os.path.join(wd, stem + ".jsonl"), "gate")
 
     fz, n_gate = gate_score("freeze")
-    ad, _ = _score(os.path.join(wd, "adopt.jsonl"), "gate")
+    ad_zs, _ = _score(os.path.join(wd, "adopt.jsonl"), "gate")
+    ad, ad_fs = ad_zs, None
     fs_p = os.path.join(wd, "adopt_fs.jsonl")
     if os.path.exists(fs_p):
         ad_fs, _ = _score(fs_p, "gate")
@@ -233,7 +245,7 @@ def cmd_recommend(args):
         m.reference_score = args.reference_estimate
         m.reference_is_estimate = True
     else:
-        proj = L.project_reference(L.history(c["workdir"]), ad)
+        proj = L.project_reference(L.history(c["workdir"]), ad_zs)
         if proj:
             m.reference_score = proj["projected_reference"]
             m.reference_is_estimate = True
@@ -255,17 +267,21 @@ def cmd_recommend(args):
             f"episodes {proj_note['from_episodes']}); "
             + proj_note["note"])
 
-    # 统计层：报告半集上的配对 CI 与 McNemar（仅对实测记录）
-    freeze_rec = F.load_records(os.path.join(wd, "freeze.jsonl"))
+    # 统计层：只用报告半集（门控读过的一半绝不参与这里的推断）
+    def report_half(path):
+        r = F.load_records(path)
+        return {i: v for i, v in r.items() if not F.gate_half(i)}
+
+    freeze_rec = report_half(os.path.join(wd, "freeze.jsonl"))
     if os.path.exists(ref_p):
-        ref_rec = F.load_records(ref_p)
+        ref_rec = report_half(ref_p)
         mean, lo, hi = S.paired_diff_ci(ref_rec, freeze_rec)
         b01, c10, pv = S.mcnemar(ref_rec, freeze_rec)
         rec.evidence["opportunity_ci_pp"] = [round(lo, 2), round(hi, 2)]
         rec.evidence["opportunity_mcnemar_p"] = round(pv, 4)
         for tag, path in [("copy", cp_p), ("refresh", rf_p)]:
             if os.path.exists(path):
-                other = F.load_records(path)
+                other = report_half(path)
                 _, lo2, hi2 = S.paired_diff_ci(other, ref_rec)
                 _, _, p2 = S.mcnemar(other, ref_rec)
                 rec.evidence[f"{tag}_vs_reference_ci_pp"] = [round(lo2, 2),
@@ -277,6 +293,8 @@ def cmd_recommend(args):
         "event": "recommend", "target": args.target,
         "task": c["task_name"], "action": rec.action.value,
         "freeze": round(fz, 4), "floor": round(ad, 4),
+        "floor_zs": round(ad_zs, 4),
+        "floor_fs": (round(ad_fs, 4) if ad_fs is not None else None),
         "reference": (round(m.reference_score, 4)
                       if m.reference_score is not None
                       and not m.reference_is_estimate else None),
@@ -313,6 +331,12 @@ def cmd_retrain(args):
              plain=c.get("plain_format", False),
              comparator=_comparator(c, args.config),
              out_records=os.path.join(wd, "reference.jsonl"))
+    if c.get("val_set"):
+        evaluate(args.target, adapter=out_dir, data_path=c["val_set"],
+                 task_kind=c["task_kind"], system_default=c["system_prompt"],
+                 plain=c.get("plain_format", False),
+                 comparator=_comparator(c, args.config),
+                 out_records=os.path.join(wd, "reference_val.jsonl"))
     print(f"reference trained and scored; rerun `upgrade-advisor recommend`")
 
 
@@ -339,6 +363,12 @@ def cmd_refresh(args):
              plain=c.get("plain_format", False),
              comparator=_comparator(c, args.config),
              out_records=os.path.join(wd, "refresh.jsonl"))
+    if c.get("val_set"):
+        evaluate(args.target, adapter=out_dir, data_path=c["val_set"],
+                 task_kind=c["task_kind"], system_default=c["system_prompt"],
+                 plain=c.get("plain_format", False),
+                 comparator=_comparator(c, args.config),
+                 out_records=os.path.join(wd, "refresh_val.jsonl"))
     print(f"refresh student trained and scored; rerun `upgrade-advisor recommend`")
 
 

@@ -29,6 +29,27 @@ def render_report(cfg, target, verdict, m, rec):
          if verdict.continuation_tokens else "distance unknown"))
     if verdict.note:
         a(f"  - {verdict.note}")
+    ev = rec.evidence
+    if any(k in ev for k in ("opportunity_ci_pp", "copy_vs_reference_ci_pp",
+                             "refresh_vs_reference_ci_pp")):
+        a("")
+        a("## Statistics (report half only; gates never see these items)")
+        if "opportunity_ci_pp" in ev:
+            lo, hi = ev["opportunity_ci_pp"]
+            a(f"- reference - frozen: 95% CI [{lo:+.2f}, {hi:+.2f}]pp, "
+              f"exact McNemar p = {ev['opportunity_mcnemar_p']}")
+        for tag in ("copy", "refresh"):
+            k = f"{tag}_vs_reference_ci_pp"
+            if k in ev:
+                lo, hi = ev[k]
+                a(f"- {tag} - reference: 95% CI [{lo:+.2f}, {hi:+.2f}]pp, "
+                  f"p = {ev[f'{tag}_vs_reference_p']}")
+    if "ledger" in ev:
+        led = ev["ledger"]
+        a("")
+        a(f"## Task ledger: {led['episodes']} episode(s), "
+          f"{led['train_gpu_minutes']} train GPU-min, "
+          f"{led['eval_gpu_minutes']} eval GPU-min accumulated")
     a("")
     a("## Reasoning")
     for x in rec.reasons:
