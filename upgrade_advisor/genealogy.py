@@ -33,8 +33,15 @@ def lookup(source: str, target: str, registry_path: str = REGISTRY
     a continuation (distances sum). Any fresh/soup hop breaks the license."""
     g = _load(registry_path)
     edges = g.get("edges", [])
+    def norm(x):
+        # allow local paths: match registry ids by basename as fallback
+        return x.replace("\\", "/").rstrip("/").split("/")[-1].lower()
+
+    def eq(a, b):
+        return a == b or norm(a) == norm(b)
+
     direct = [e for e in edges
-              if e["source"] == source and e["target"] == target]
+              if eq(e["source"], source) and eq(e["target"], target)]
     if direct:
         e = direct[0]
         return GenealogyVerdict(
@@ -46,9 +53,10 @@ def lookup(source: str, target: str, registry_path: str = REGISTRY
     by_src = {}
     for e in edges:
         by_src.setdefault(e["source"], []).append(e)
-    for e1 in by_src.get(source, []):
+    src_key = next((k for k in by_src if eq(k, source)), source)
+    for e1 in by_src.get(src_key, []):
         for e2 in by_src.get(e1["target"], []):
-            if e2["target"] != target:
+            if not eq(e2["target"], target):
                 continue
             types = {e1["type"], e2["type"]}
             if types == {"continuation"}:
