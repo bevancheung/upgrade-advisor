@@ -1,0 +1,15 @@
+# Demo episode: Banking77 intent classification, Qwen2.5 -> candidate target.
+# Get the public data (3,080 test items) with:
+#   python prepare_data.py     # writes data/test.jsonl from HF banking77
+task_name: banking77_demo
+task_kind: classification
+test_set: data/test.jsonl
+val_set: null
+system_prompt: "You are an intent classification specialist for a retail bank's customer support. Classify the customer query into exactly one intent label. Respond with the label only."
+source_base: Qwen/Qwen2.5-7B-Instruct
+adapter: adapters/banking77_lora    # train one with upgrade_advisor.train or bring your own
+plain_format: false
+inputs_retained: true
+gold_labels_retained: true
+flip_budget: 0.03
+workdir: runs/banking77
