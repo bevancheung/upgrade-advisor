@@ -50,3 +50,51 @@ scores -- and the report flags the small gate set explicitly.
 - statistics were computed but not rendered; now report-half-only by design
 - ledger double-counting on re-runs; dual-basis floors for beta
 - missing eos handling for base models; first-line cut for plain outputs
+
+## 5. The v2 decision core, replayed over eleven industry episodes
+
+After a theory review of the scoring layer (post-hoc-power fallacy;
+evidence fragmentation; a 2-item flip deciding a RETRAIN), the opportunity
+gate was rebuilt: pooled paired evidence, a TOST three-zone verdict, a
+corpus prior from the paper's 193 cells, and a verdict/action split with
+two new actions (COLLECT, WAIT). All eleven episodes were re-judged and
+every probe layer was run on real GPUs; the full reports live in
+`docs/case_reports/`.
+
+| Episode | Action (verdict) | Pooled CI (pp) | P(gain>eps) |
+|---|---|---|---|
+| AirOne (ATIS) | COLLECT (unresolved) | [-0.4, +1.4] | 11% |
+| TripFun | FREEZE (equivalence) | [-0.9, +0.9] | -- |
+| NewsDesk | FREEZE (equivalence) | [-1.6, +0.8] | -- |
+| WorkDesk | WAIT (unresolved) | [-1.2, +1.2] | 4% |
+| AutoLink | FREEZE (equivalence) | [-2.6, +0.5] | -- |
+| DineCo | WAIT (unresolved) | [-2.0, +1.4] | 5% |
+| CardCo -> Qwen2.5 | COLLECT (unresolved) | [-1.1, +2.1] | 25% |
+| CloudTalk (slots) | FREEZE (equivalence) | [-0.6, +2.0] | -- |
+| EchoHome | COLLECT (unresolved) | [-0.8, +3.6] | 62% |
+| SenseEdge | COLLECT (unresolved) | [-1.3, +2.3] | -- (lineage unknown) |
+| Fintone | WAIT (unresolved) | [-3.4, +1.4] | 5% |
+
+Notable outcomes, all from real records:
+- **AirOne's old RETRAIN dissolves.** The original verdict rested on a
+  2-item flip in one evidence fragment; pooling all 400 paired records
+  shows 2 fixes / 0 breaks. The symmetric three-zone gate calls it
+  unresolved and routes it to COLLECT.
+- **FREEZE became a verdict, not a default.** Four episodes now carry an
+  equivalence statement with an exclusion bound ("gains above 0.9pp are
+  excluded by the data") instead of "no measurable gain".
+- **The confidence layer sees what 0/1 accuracy cannot, sometimes.** In
+  6 of 10 classification episodes the paired log-loss favors the
+  reference (EchoHome -0.070), directionally consistent with the
+  verdict leaning; none reach significance at these n.
+- **A negative result, reported as such:** under rule-based perturbation
+  (typo/casing/filler/punct) the newer bases are *not* more robust once
+  fine-tuned on the same data (mean delta -0.28pp across episodes;
+  TripFun -1.67pp). The "hidden robustness dividend of newer
+  pretraining" did not survive same-recipe fine-tuning here.
+
+Operating characteristics of the v2 core, validated by subsampling the
+paper's own per-example corpus (21 real upgrade cells, leave-one-pair-out
+prior, COLLECT played out on real disagreement labels): false-open rate
+at n=100 drops from 17.9% (point-estimate gate) to 1.9%, at a stated cost
+of ~0.1pp mean regret. See `docs/small_n_operating_curve.md`.
