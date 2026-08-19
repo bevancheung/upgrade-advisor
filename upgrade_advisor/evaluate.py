@@ -192,8 +192,11 @@ def label_score(model_path, data_path, labels, out_records,
         model = PeftModel.from_pretrained(model, adapter)
     model.eval()
 
+    # Score label + eos so candidate events are disjoint: a bare prefix
+    # label ("insurance" vs "insurance_change") would otherwise absorb the
+    # probability mass of every longer continuation and win on sum-logprob.
     lab_ids = {lb: tok(lb, add_special_tokens=False)["input_ids"]
-               for lb in labels}
+               + [tok.eos_token_id] for lb in labels}
     recs = []
     t0 = time.time()
     for it in items:
