@@ -44,6 +44,14 @@ def render_report(cfg, target, verdict, m, rec):
                 lo, hi = ev[k]
                 a(f"- {tag} - reference: 95% CI [{lo:+.2f}, {hi:+.2f}]pp, "
                   f"p = {ev[f'{tag}_vs_reference_p']}")
+    if "label_metrics" in ev:
+        a("")
+        a("## Label metrics (macro-F1: class-imbalance-robust; "
+          "invalid rate: prediction outside the label inventory)")
+        for stem, d in ev["label_metrics"].items():
+            a(f"- {stem}: macro-F1 **{d['macro_f1']}**, "
+              f"invalid outputs {d['invalid_rate']:.2%} "
+              f"({d['n_classes']} classes)")
     if "ledger" in ev:
         led = ev["ledger"]
         a("")
@@ -72,6 +80,7 @@ def render_report(cfg, target, verdict, m, rec):
     a("")
     a("*Policy and margins from UpgradeBench (2026); validated over 33 "
       "measured upgrade episodes (0.37pp mean regret, zero regressions, "
-      "split-half gating). Scope: LoRA-class adapters, 1.5-8B open-weight "
-      "models.*")
+      "split-half gating). Negative-flip rate follows Yan et al., "
+      "Positive-Congruent Training, CVPR 2021. Scope: LoRA-class adapters, "
+      "1.5-8B open-weight models.*")
     return "\n".join(lines)

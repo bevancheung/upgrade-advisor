@@ -55,3 +55,29 @@ def test_costs_summary_three_dimensions():
         assert cs["teacher_queries"] == 2000
         assert cs["validation_items"] == 400
         assert abs(cs["train_gpu_minutes"] - 18.0) < 1e-9
+
+
+def test_costs_summary_dedupes_reruns():
+    with tempfile.TemporaryDirectory() as wd:
+        for _ in range(3):   # 同一 episode 重复 recommend 三次
+            L.append(wd, {"event": "recommend", "target": "g1",
+                          "eval_minutes": 5.0, "train_minutes": 0})
+        cs = L.costs_summary(L.history(wd))
+        assert cs["eval_gpu_minutes"] == 5.0
+
+
+def test_label_metrics_macro_f1():
+    import json, os
+    from upgrade_advisor.stats import label_metrics
+    with tempfile.TemporaryDirectory() as wd:
+        p = os.path.join(wd, "r.jsonl")
+        rows = ([{"gold": "a", "pred": "a"}] * 8
+                + [{"gold": "b", "pred": "a"}] * 1
+                + [{"gold": "b", "pred": "zzz"}] * 1)
+        with open(p, "w", encoding="utf-8") as f:
+            for i, r in enumerate(rows):
+                f.write(json.dumps({"id": i, **r}) + "
+")
+        m = label_metrics(p)
+        assert m["n_classes"] == 2 and m["invalid_rate"] == 0.1
+        assert 0.4 < m["macro_f1"] < 0.5   # a: F1~0.94, b: 0 -> macro~0.47

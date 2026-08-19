@@ -294,6 +294,15 @@ def cmd_recommend(args):
                                                              round(hi2, 2)]
                 rec.evidence[f"{tag}_vs_reference_p"] = round(p2, 4)
 
+    if c["task_kind"] == "classification":
+        lm = {}
+        for stem in ("freeze", "adopt", "reference", "copy", "refresh"):
+            p = os.path.join(wd, stem + ".jsonl")
+            if os.path.exists(p):
+                lm[stem] = S.label_metrics(p)
+        if lm:
+            rec.evidence["label_metrics"] = lm
+
     _check_manifest(c, args.config, rec.warnings)
     L.append(c["workdir"], {
         "event": "recommend", "target": args.target,

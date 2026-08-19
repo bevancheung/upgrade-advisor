@@ -84,7 +84,13 @@ def project_reference(entries: List[dict], new_floor: float
 
 
 def costs_summary(entries: List[dict]) -> dict:
-    """Phase 3-2: GPU minutes, labels consumed, and validation load."""
+    """Phase 3-2: GPU minutes, labels consumed, and validation load.
+    Re-running a command must not inflate the books: only the latest entry
+    per (event, target) pair is counted."""
+    latest = {}
+    for e in entries:
+        latest[(e.get("event"), e.get("target"))] = e
+    entries = list(latest.values())
     tr = sum(e.get("train_minutes") or 0 for e in entries)
     ev = sum(e.get("eval_minutes") or 0 for e in entries)
     lb = sum(e.get("gold_labels_consumed") or 0 for e in entries)
