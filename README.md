@@ -14,10 +14,29 @@ of four actions with the evidence attached:
 
 | Action | When the policy picks it |
 |---|---|
-| **FREEZE** | The retrained reference would beat your frozen specialist by ≤ ε (1pp classification / 2pp structured generation) |
+| **FREEZE** | *Equivalence established*: the pooled paired CI excludes any gain above ε (1pp classification / 2pp structured) — a verdict with an exclusion bound, not a default |
 | **COPY** | Adapter loads without mapping **and** target is a documented *short* continuation of your exact base weights **and** the copy passes a regression gate |
 | **REFRESH** | Retraining is worthwhile, gold labels are expensive, and you retained task inputs — your current specialist relabels them (annotation-free; paper: retention 0.96–1.05 vs. gold retraining) |
-| **RETRAIN** | High-coupling task with a clearly rising reference, or no cheaper path is available |
+| **RETRAIN** | *Gain established* (CI above ε, or ≥30% of frozen errors removed with the direction settled by exact sign test) and no cheaper path passes its gates |
+| **COLLECT** | The evidence cannot resolve ε yet and the posterior leaves the gain live — label the disagreement set (`probe-disagree` writes it with a priced convergence plan) |
+| **WAIT** | The evidence cannot resolve ε and the corpus-prior posterior gives the gain <10% chance of clearing your decision ε — hold until the next release |
+
+Every recommendation separates the **epistemic verdict** (gain-established /
+equivalence / unresolved) from the **operational action**, judges on the
+*pooled* paired records (every val+test pair the episode holds), and — when
+the verdict is unresolved — reports a posterior over the true gain under an
+empirical-Bayes prior extracted from the paper's own 193 measured cells
+(`registry/gain_prior.json`, rebuilt by `scripts/build_gain_prior.py`).
+
+**Why this matters at enterprise evidence sizes** (n=100–600): replayed over
+21 real upgrade cells from the paper corpus
+(`docs/small_n_operating_curve.md`), the naive point-estimate gate falsely
+opens the upgrade waterfall on **17.9%** of ground-truth-null episodes at
+n=100; this core holds that at **1.9%** while its equivalence verdicts are
+wrong ≤0.5% of the time, at a stated cost of ~0.1pp mean regret. And when the
+verdict is unresolved, 25 labeled *disagreements* resolve the direction more
+often than 100 labeled i.i.d. samples — annotation complexity is
+O(#disagreements), not O(n).
 
 ## Why not just copy the adapter when shapes match?
 
@@ -62,6 +81,15 @@ upgrade-advisor gate my_task.yaml --candidate outputs/new_adapter
 upgrade-advisor manifest my_task.yaml    # pin split hashes (Phase 0)
 upgrade-advisor retrain  my_task.yaml --target ...   # reference on target
 upgrade-advisor refresh  my_task.yaml --target ...   # annotation-free student
+
+# evidence probes (each feeds new sections into `recommend`):
+upgrade-advisor probe-disagree my_task.yaml --target ...  # zero GPU: the
+#   disagreement set + a priced labeling plan; --inputs FILE scans unlabeled
+#   traffic with both systems (disagreement needs no gold labels)
+upgrade-advisor probe-conf   my_task.yaml --target ...    # confidence layer:
+#   label-logprob scoring -> paired log-loss, ECE, risk-coverage AURC
+upgrade-advisor probe-robust my_task.yaml --target ...    # robustness layer:
+#   typo/casing/filler/punct perturbations, gold unchanged
 ```
 
 Reports carry paired bootstrap CIs and exact McNemar p-values for every
