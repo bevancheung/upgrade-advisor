@@ -57,3 +57,9 @@ def test_retrain_on_high_coupling_without_cheaper_path():
 def test_small_gate_set_warns():
     r = recommend(_m(reference_score=0.95, gate_set_size=120))
     assert any("gate set" in w for w in r.warnings)
+
+
+def test_epsilon_boundary_is_freeze():
+    # 机会差恰好等于 epsilon（含浮点表示误差）必须判 FREEZE
+    r = recommend(_m(freeze_score=0.99, reference_score=1.0000))
+    assert r.action == Action.FREEZE

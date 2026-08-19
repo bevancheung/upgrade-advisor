@@ -90,7 +90,8 @@ def recommend(m: Measurements, flip_budget: Optional[float] = None) -> Recommend
         return r
     gain = m.reference_score - m.freeze_score
     r.evidence["opportunity_pp"] = round(gain * 100, 2)
-    if gain <= eps:
+    # 1e-9 tolerance: a gain exactly at epsilon must not flip on float error
+    if gain <= eps + 1e-9:
         r.reasons.append(
             f"retraining reference beats the frozen specialist by "
             f"{gain*100:.2f}pp <= epsilon ({eps*100:.0f}pp): upgrading buys "
