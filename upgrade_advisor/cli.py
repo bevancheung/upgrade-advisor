@@ -339,6 +339,14 @@ def cmd_recommend(args):
     rb = os.path.join(wd, "robust_summary.json")
     if os.path.exists(rb):
         rec.evidence["robustness"] = json.load(open(rb, encoding="utf-8"))
+    # ---- COLLECT channel (review-2), if probe-disagree has run ----
+    dg = os.path.join(wd, "disagree_summary.json")
+    if os.path.exists(dg):
+        d = json.load(open(dg, encoding="utf-8"))
+        rec.evidence["disagreement"] = {
+            k: d[k] for k in ("n_disagreements", "disagreement_rate",
+                              "sign_test_p", "collection_plan")
+            if k in d}
     # ---- economic epsilon (fix #6) ----
     if all(c.get(k) for k in ("monthly_requests", "cost_per_error",
                               "migration_cost")):
@@ -551,6 +559,56 @@ def cmd_probe_robust(args):
     print("rerun `upgrade-advisor recommend` to fold these in")
 
 
+def cmd_probe_disagree(args):
+    """COLLECT channel (review-2): the decision-relevant evidence lives in
+    the items where the two systems disagree, and disagreement is visible
+    without gold labels. Record mode (default, zero GPU) extracts the
+    disagreement set from existing paired records with a labeling plan;
+    --inputs runs both systems over an unlabeled jsonl (id + user/text
+    fields) and emits the disagreement set for annotation."""
+    from . import disagree as D
+    c = _cfg(args.config)
+    wd = _wd(c, args.target)
+    if args.inputs:
+        from .evaluate import evaluate
+        common = dict(task_kind=c["task_kind"],
+                      system_default=c["system_prompt"],
+                      plain=c.get("plain_format", False))
+        print("[1/2] frozen specialist over unlabeled inputs")
+        evaluate(c["source_base"], adapter=c["adapter"],
+                 data_path=args.inputs,
+                 out_records=os.path.join(wd, "freeze_unlabeled.jsonl"),
+                 **common)
+        ref_ad = os.path.join(wd, "reference_adapter")
+        if not os.path.isdir(ref_ad):
+            print("no reference_adapter in workdir -- run `retrain` first")
+            return
+        print("[2/2] reference over unlabeled inputs")
+        evaluate(args.target, adapter=ref_ad, data_path=args.inputs,
+                 out_records=os.path.join(wd, "reference_unlabeled.jsonl"),
+                 **common)
+        rows = D.disagreement_set(
+            D.load_preds(os.path.join(wd, "freeze_unlabeled.jsonl")),
+            D.load_preds(os.path.join(wd, "reference_unlabeled.jsonl")))
+        out = os.path.join(wd, "disagreements_unlabeled.jsonl")
+        with open(out, "w", encoding="utf-8") as f:
+            for r in rows:
+                r.pop("gold", None), r.pop("outcome", None)
+                f.write(json.dumps(r, ensure_ascii=False) + "\n")
+        print(f"{len(rows)} disagreement item(s) -> {out}")
+        print("label these (gold field), then feed them back as gate data: "
+              "McNemar conditions on discordant pairs, so this is the whole "
+              "inference at a fraction of the annotation cost")
+        return
+    s = D.summarize(wd)
+    if s is None:
+        print("no paired records in workdir -- run `measure` and `retrain` "
+              "first")
+        return
+    print(json.dumps(s, ensure_ascii=False, indent=2))
+    print("rerun `upgrade-advisor recommend` to fold these in")
+
+
 def cmd_gate(args):
     c = _cfg(args.config)
     serving = F.load_records(args.serving)
@@ -604,6 +662,12 @@ def main():
     p = sub.add_parser("probe-robust"); p.add_argument("config")
     p.add_argument("--target", required=True)
     p.set_defaults(f=cmd_probe_robust)
+    p = sub.add_parser("probe-disagree"); p.add_argument("config")
+    p.add_argument("--target", required=True)
+    p.add_argument("--inputs", default=None,
+                   help="unlabeled jsonl to scan for disagreements (GPU); "
+                   "omit for record mode (zero GPU)")
+    p.set_defaults(f=cmd_probe_disagree)
     p = sub.add_parser("gate"); p.add_argument("config")
     p.add_argument("--serving", required=True, help="records jsonl of serving system")
     p.add_argument("--candidate", required=True)

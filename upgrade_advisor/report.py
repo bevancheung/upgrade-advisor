@@ -71,6 +71,20 @@ def render_report(cfg, target, verdict, m, rec):
         a(f"- risk-coverage AURC (lower = better selective routing): "
           f"frozen {ev['aurc']['freeze']}, "
           f"reference {ev['aurc']['reference']}")
+    if "disagreement" in ev:
+        dg = ev["disagreement"]
+        a("")
+        a("## Disagreement set (COLLECT channel: label these, not more "
+          "i.i.d. samples)")
+        a(f"- {dg['n_disagreements']} disagreement item(s) "
+          f"({dg['disagreement_rate']:.1%} of pooled pairs); exact sign "
+          f"test on labeled outcomes p = {dg['sign_test_p']}")
+        if dg.get("collection_plan"):
+            plan = ", ".join(
+                f"+{p['label_k_more']}: {p['p_direction_settles']:.0%}"
+                for p in dg["collection_plan"])
+            a(f"- probability the direction settles after labeling k more "
+              f"disagreements -- {plan}")
     if "robustness" in ev:
         rb = ev["robustness"]
         a("")
