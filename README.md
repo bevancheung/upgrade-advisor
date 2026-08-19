@@ -106,7 +106,7 @@ or much larger models, treat the recommendation as a starting hypothesis and
 keep the regression gate. The policy's gates consume your validation data;
 gate sampling error on small sets is real (the paper's worst replay episode
 came from exactly that) — the report states the gate set size next to every
-verdict. See [PLAYBOOK.md](PLAYBOOK.md) for the full non-technical recipe.
+verdict. See [PLAYBOOK.md](PLAYBOOK.md) for the full non-technical recipe. Validation runs and the defects they caught are documented in [docs/CASE_STUDIES.md](docs/CASE_STUDIES.md).
 
 ## Repository layout
 
