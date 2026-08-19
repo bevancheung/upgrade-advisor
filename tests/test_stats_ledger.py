@@ -76,8 +76,7 @@ def test_label_metrics_macro_f1():
                 + [{"gold": "b", "pred": "zzz"}] * 1)
         with open(p, "w", encoding="utf-8") as f:
             for i, r in enumerate(rows):
-                f.write(json.dumps({"id": i, **r}) + "
-")
+                f.write(json.dumps({"id": i, **r}) + chr(10))
         m = label_metrics(p)
         assert m["n_classes"] == 2 and m["invalid_rate"] == 0.1
         assert 0.4 < m["macro_f1"] < 0.5   # a: F1~0.94, b: 0 -> macro~0.47
