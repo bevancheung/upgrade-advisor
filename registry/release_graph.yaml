@@ -15,6 +15,10 @@ checkpoints:
   allenai/OLMo-1-7B:           {family: olmo, released: 2024-02}
   allenai/OLMo-1.7-7B:         {family: olmo, released: 2024-04}
   allenai/OLMo-2-1124-7B:      {family: olmo, released: 2024-11}
+  Qwen/Qwen1.5-1.8B-Chat:      {family: qwen, released: 2024-02}
+  Qwen/Qwen2-1.5B-Instruct:    {family: qwen, released: 2024-06}
+  Qwen/Qwen2.5-1.5B-Instruct:  {family: qwen, released: 2024-09}
+  Qwen/Qwen3-1.7B:             {family: qwen, released: 2025-04}
 
 edges:
   - {source: Qwen/Qwen1.5-7B-Chat, target: Qwen/Qwen2-7B-Instruct,
@@ -51,3 +55,14 @@ edges:
      target: "allenai/OLMo-2-1124-7B",
      type: soup, confidence: verified,
      note: merge of independently annealed branches}
+  # Small-scale Qwen track (paper-verified at 1.5-1.8B)
+  - {source: Qwen/Qwen1.5-1.8B-Chat, target: Qwen/Qwen2-1.5B-Instruct,
+     type: fresh_pretraining, confidence: inferred,
+     note: architecture break at small scale}
+  - {source: Qwen/Qwen2-1.5B-Instruct, target: Qwen/Qwen2.5-1.5B-Instruct,
+     type: fresh_pretraining, confidence: inferred,
+     note: shape-identical independent run; paper measured copy retention
+           -0.60..0.10 at this scale}
+  - {source: Qwen/Qwen2.5-1.5B-Instruct, target: Qwen/Qwen3-1.7B,
+     type: fresh_pretraining, confidence: inferred,
+     note: architecture break at small scale}
