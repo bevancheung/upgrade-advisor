@@ -44,6 +44,36 @@ def render_report(cfg, target, verdict, m, rec):
                 lo, hi = ev[k]
                 a(f"- {tag} - reference: 95% CI [{lo:+.2f}, {hi:+.2f}]pp, "
                   f"p = {ev[f'{tag}_vs_reference_p']}")
+    if "mde_pp" in ev:
+        a(f"- power: minimal detectable difference at this gate set = "
+          f"{ev['mde_pp']}pp")
+    if "opportunity_rer" in ev:
+        a(f"- error-scale view: relative error reduction "
+          f"{ev['opportunity_rer']:+.0%} "
+          f"({ev.get('freeze_errors_on_gate', '?')} frozen errors on gate)")
+    if "nll_ref_minus_freeze" in ev:
+        dm, dlo, dhi = ev["nll_ref_minus_freeze"]
+        a("")
+        a("## Confidence layer (proper scoring; more power than accuracy)")
+        a(f"- paired log-loss, reference - frozen: {dm:+.4f} "
+          f"(95% CI [{dlo:+.4f}, {dhi:+.4f}]; negative favors reference)")
+        a(f"- calibration ECE: frozen {ev['ece']['freeze']}, "
+          f"reference {ev['ece']['reference']}")
+        a(f"- risk-coverage AURC (lower = better selective routing): "
+          f"frozen {ev['aurc']['freeze']}, "
+          f"reference {ev['aurc']['reference']}")
+    if "robustness" in ev:
+        rb = ev["robustness"]
+        a("")
+        a("## Robustness under perturbation (typo/casing/filler/punct; "
+          "gold unchanged)")
+        a(f"- frozen: {rb['freeze_perturbed']}"
+          + (f"; reference: {rb['reference_perturbed']} "
+             f"(delta {rb['robustness_delta_pp']:+.2f}pp)"
+             if "reference_perturbed" in rb else ""))
+    if "economic_epsilon_pp" in ev:
+        a(f"- economic epsilon (break-even gain at stated volume/costs): "
+          f"{ev['economic_epsilon_pp']}pp")
     if "label_metrics" in ev:
         a("")
         a("## Label metrics (macro-F1: class-imbalance-robust; "

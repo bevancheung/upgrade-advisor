@@ -59,7 +59,16 @@ def test_small_gate_set_warns():
     assert any("gate set" in w for w in r.warnings)
 
 
-def test_epsilon_boundary_is_freeze():
-    # 机会差恰好等于 epsilon（含浮点表示误差）必须判 FREEZE
+def test_epsilon_boundary_rer_overrides():
+    # 理论重审 fix#1：机会差恰在 epsilon 上，但错误率 1%→0%（RER=100%，
+    # 错误数=15≥10）→ 错误率口径打开升级瀑布（默认 n=1500）
     r = recommend(_m(freeze_score=0.99, reference_score=1.0000))
-    assert r.action == Action.FREEZE
+    assert r.action == Action.RETRAIN
+
+
+def test_epsilon_boundary_without_error_mass_stays_conservative():
+    # 同样的边界但 n=300 → freeze 错误仅 3 条，RER 门不开；
+    # 欠功效 → INCONCLUSIVE（浮点容差仍在，不会误判 RETRAIN）
+    r = recommend(_m(freeze_score=0.99, reference_score=1.0000,
+                     gate_set_size=300, discordant_rate=0.03))
+    assert r.action in (Action.FREEZE, Action.INCONCLUSIVE)

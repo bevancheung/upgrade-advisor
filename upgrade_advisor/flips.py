@@ -19,6 +19,39 @@ def load_records(path: str) -> Dict[str, bool]:
     return out
 
 
+def load_records_gold(path: str) -> Dict[str, tuple]:
+    """id -> (correct, gold) for severity-weighted flips."""
+    out = {}
+    with open(path, encoding="utf-8") as f:
+        for line in f:
+            r = json.loads(line)
+            out[str(r["id"])] = (bool(r["correct"]), str(r.get("gold", "")))
+    return out
+
+
+def weighted_flips(serving_path: str, candidate_path: str,
+                   class_weights: dict, half: str = "all") -> "FlipReport":
+    """Severity-weighted negative/positive flips: each item weighted by
+    its gold-label weight (default 1.0). NFR budgets then reflect that
+    breaking a high-severity class costs more (cost-sensitive evaluation)."""
+    A = load_records_gold(serving_path)
+    B = load_records_gold(candidate_path)
+    ids = sorted(set(A) & set(B))
+    if half == "gate":
+        ids = [i for i in ids if gate_half(i)]
+    elif half == "report":
+        ids = [i for i in ids if not gate_half(i)]
+    w = lambda i: float(class_weights.get(A[i][1], 1.0))
+    tot = sum(w(i) for i in ids)
+    nf = sum(w(i) for i in ids if A[i][0] and not B[i][0])
+    pf = sum(w(i) for i in ids if not A[i][0] and B[i][0])
+    return FlipReport(n=len(ids), negative_flips=round(nf, 2),
+                      positive_flips=round(pf, 2),
+                      nfr=nf / tot if tot else 0.0,
+                      pfr=pf / tot if tot else 0.0,
+                      net_pp=((pf - nf) / tot * 100) if tot else 0.0)
+
+
 def gate_half(item_id: str) -> bool:
     """True -> gate half; False -> reporting half. Stable id hash, so gates
     and reported scores never share items (paper §6, split-half replay)."""

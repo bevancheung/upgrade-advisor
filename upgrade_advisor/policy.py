@@ -26,6 +26,18 @@ class Action(str, Enum):
     COPY = "copy"
     REFRESH = "refresh"
     RETRAIN = "retrain"
+    INCONCLUSIVE = "inconclusive"   # gate set cannot resolve epsilon (fix #2)
+
+
+# Relative-error-reduction gate (theory-review fix #1): near the accuracy
+# ceiling, absolute pp compress real gains; a reference that removes >=30%
+# of the frozen specialist's errors (with enough error mass to be meaningful)
+# also opens the upgrade waterfall.
+RER_THRESHOLD = 0.30
+RER_MIN_ERRORS = 10
+# Fewer frozen errors than this on the gate set means the eval itself no
+# longer discriminates (fix #3).
+SATURATION_MIN_ERRORS = 20
 
 
 @dataclass
@@ -51,6 +63,9 @@ class Measurements:
     shape_compatible: bool = False
     documented_continuation: bool = False
     continuation_tokens: Optional[float] = None
+    # power layer (fix #2): freeze-vs-reference disagreement rate on the
+    # gate set, when the reference is measured (None for estimates)
+    discordant_rate: Optional[float] = None
 
 
 @dataclass
@@ -90,12 +105,64 @@ def recommend(m: Measurements, flip_budget: Optional[float] = None) -> Recommend
         return r
     gain = m.reference_score - m.freeze_score
     r.evidence["opportunity_pp"] = round(gain * 100, 2)
-    # 1e-9 tolerance: a gain exactly at epsilon must not flip on float error
-    if gain <= eps + 1e-9:
+
+    # ---- error-scale view (fix #1) ----
+    err_f = 1.0 - m.freeze_score
+    err_r = 1.0 - m.reference_score
+    freeze_errors = round(err_f * m.gate_set_size) if m.gate_set_size else None
+    rer = (err_f - err_r) / err_f if err_f > 1e-12 else None
+    if rer is not None:
+        r.evidence["opportunity_rer"] = round(rer, 3)
+    if freeze_errors is not None:
+        r.evidence["freeze_errors_on_gate"] = freeze_errors
+
+    # ---- saturation flag (fix #3) ----
+    saturated = (freeze_errors is not None
+                 and freeze_errors < SATURATION_MIN_ERRORS)
+    if saturated:
+        r.warnings.append(
+            f"EVAL-SATURATED: the frozen specialist makes only "
+            f"{freeze_errors} error(s) on the gate set -- any upgrade "
+            "comparison rests on that many items. Harvest hard/tail "
+            "examples (e.g. production misroutes) before trusting an "
+            "upgrade verdict here")
+
+    # ---- opportunity decision: absolute-pp OR relative-error gate ----
+    rer_opens = (rer is not None and rer >= RER_THRESHOLD and gain > 0
+                 and freeze_errors is not None
+                 and freeze_errors >= RER_MIN_ERRORS)
+    if rer_opens and gain <= eps + 1e-9:
+        r.reasons.append(
+            f"absolute gain {gain*100:.2f}pp is within epsilon, but the "
+            f"reference removes {rer:.0%} of the frozen specialist's errors "
+            f"({freeze_errors} errors on the gate set) -- near the accuracy "
+            "ceiling the error-rate scale is the decision-relevant one "
+            "(bounded-metric compression), so the upgrade waterfall opens")
+    if gain <= eps + 1e-9 and not rer_opens:
+        # ---- power check before declaring a null (fix #2) ----
+        if (not m.reference_is_estimate and m.discordant_rate is not None
+                and m.gate_set_size):
+            from . import stats as _S
+            mde_pp = _S.mde(m.discordant_rate, m.gate_set_size)
+            r.evidence["mde_pp"] = round(mde_pp * 100, 2)
+            if mde_pp > eps and abs(gain) < mde_pp:
+                n_req = _S.required_n(m.discordant_rate, eps)
+                r.action = Action.INCONCLUSIVE
+                r.reasons.append(
+                    f"the gate set cannot resolve this decision: minimal "
+                    f"detectable difference at n={m.gate_set_size} is "
+                    f"{mde_pp*100:.1f}pp (> epsilon {eps*100:.0f}pp) and the "
+                    f"observed gain {gain*100:.2f}pp is inside that noise "
+                    f"floor. Resolving epsilon needs roughly n={n_req}. "
+                    "Operational stance until then: keep serving the frozen "
+                    "specialist, and grow the gate set")
+                return r
         r.reasons.append(
             f"retraining reference beats the frozen specialist by "
-            f"{gain*100:.2f}pp <= epsilon ({eps*100:.0f}pp): upgrading buys "
-            "nothing measurable on this task")
+            f"{gain*100:.2f}pp <= epsilon ({eps*100:.0f}pp)"
+            + (f" with relative error reduction {rer:.0%} below the "
+               f"{RER_THRESHOLD:.0%} gate" if rer is not None else "")
+            + ": upgrading buys nothing measurable on this task")
         if m.reference_is_estimate:
             r.warnings.append("reference was beta-estimated, not trained; "
                               "log the trained reference when convenient")

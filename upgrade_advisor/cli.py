@@ -41,6 +41,13 @@ plain_format: false              # true for base (non-instruct) checkpoints
 inputs_retained: true            # unlabeled train inputs kept? (enables REFRESH)
 gold_labels_retained: true
 flip_budget: 0.03                # max negative-flip rate vs serving system
+# economic epsilon (optional): break-even gain = migration_cost /
+# (monthly_requests * amortization_months * cost_per_error)
+monthly_requests: null
+cost_per_error: null
+migration_cost: null
+amortization_months: 6
+class_weights: {}                # e.g. {report_lost_card: 5.0}
 fewshot_k: 5                     # adoption floor also measured few-shot
 workdir: runs/my_task
 """
@@ -241,6 +248,12 @@ def cmd_recommend(args):
     ref_p = os.path.join(wd, "reference.jsonl")
     if os.path.exists(ref_p):
         m.reference_score, _ = gate_score("reference")
+        fz_rec_g = {i: v for i, v in
+                    F.load_records(os.path.join(wd, "freeze.jsonl")).items()
+                    if F.gate_half(i)}
+        rf_rec_g = {i: v for i, v in F.load_records(ref_p).items()
+                    if F.gate_half(i)}
+        m.discordant_rate = S.discordant_rate(fz_rec_g, rf_rec_g)
     elif args.reference_estimate is not None:
         m.reference_score = args.reference_estimate
         m.reference_is_estimate = True
@@ -293,6 +306,47 @@ def cmd_recommend(args):
                 rec.evidence[f"{tag}_vs_reference_ci_pp"] = [round(lo2, 2),
                                                              round(hi2, 2)]
                 rec.evidence[f"{tag}_vs_reference_p"] = round(p2, 4)
+
+    # ---- confidence layer (fix #4), if probe-conf has run ----
+    lp_f = os.path.join(wd, "freeze_lp.jsonl")
+    lp_r = os.path.join(wd, "reference_lp.jsonl")
+    if os.path.exists(lp_f) and os.path.exists(lp_r):
+        dm, dlo, dhi = S.paired_nll_ci(lp_r, lp_f)
+        rec.evidence["nll_ref_minus_freeze"] = [round(dm, 4),
+                                                round(dlo, 4),
+                                                round(dhi, 4)]
+        rec.evidence["ece"] = {"freeze": S.ece(lp_f),
+                               "reference": S.ece(lp_r)}
+        rec.evidence["aurc"] = {"freeze": S.aurc(lp_f),
+                                "reference": S.aurc(lp_r)}
+        if dhi < 0:
+            rec.warnings.append(
+                "confidence layer: the reference has significantly lower "
+                "log-loss than the frozen specialist even where accuracy "
+                "ties -- an upgrade benefit the 0/1 metric cannot see; "
+                "weigh it if selective routing (confidence thresholds) is "
+                "part of serving")
+    # ---- robustness layer (fix #5), if probe-robust has run ----
+    rb = os.path.join(wd, "robust_summary.json")
+    if os.path.exists(rb):
+        rec.evidence["robustness"] = json.load(open(rb, encoding="utf-8"))
+    # ---- economic epsilon (fix #6) ----
+    if all(c.get(k) for k in ("monthly_requests", "cost_per_error",
+                              "migration_cost")):
+        months = c.get("amortization_months") or 6
+        denom = c["monthly_requests"] * months * c["cost_per_error"]
+        econ_eps = c["migration_cost"] / denom if denom else None
+        if econ_eps is not None:
+            rec.evidence["economic_epsilon_pp"] = round(econ_eps * 100, 3)
+            gain_now = rec.evidence.get("opportunity_pp")
+            if (gain_now is not None and gain_now / 100 > econ_eps
+                    and rec.action.value in ("freeze", "inconclusive")):
+                rec.warnings.append(
+                    f"economic epsilon ({econ_eps*100:.3f}pp break-even at "
+                    "your volume/costs) is below the statistical margin -- "
+                    "the observed gain would already pay for migration if "
+                    "it were statistically established; consider growing "
+                    "the gate set rather than dismissing the upgrade")
 
     if c["task_kind"] == "classification":
         lm = {}
@@ -428,11 +482,77 @@ def cmd_manifest(args):
     print(f"pinned {len(man)} files in {mp}")
 
 
+def cmd_probe_conf(args):
+    """Confidence-layer probe (fix #4): label-logprob scoring of frozen and
+    reference systems -> paired log-loss, ECE, risk-coverage inputs."""
+    from .evaluate import label_score
+    c = _cfg(args.config)
+    wd = _wd(c, args.target)
+    labels = [l for l in open(args.labels or os.path.join(
+        os.path.dirname(c["test_set"]), "labels.txt"),
+        encoding="utf-8").read().split("\n") if l.strip()]
+    common = dict(data_path=c["test_set"], labels=labels,
+                  system_default=c["system_prompt"],
+                  plain=c.get("plain_format", False))
+    print("[1/2] frozen specialist, label-logprob scoring")
+    label_score(c["source_base"], adapter=c["adapter"],
+                out_records=os.path.join(wd, "freeze_lp.jsonl"), **common)
+    ref_ad = os.path.join(wd, "reference_adapter")
+    if os.path.isdir(ref_ad):
+        print("[2/2] reference, label-logprob scoring")
+        label_score(args.target, adapter=ref_ad,
+                    out_records=os.path.join(wd, "reference_lp.jsonl"),
+                    **common)
+    else:
+        print("[2/2] no reference_adapter in workdir -- run `retrain` first")
+    print("done; rerun `upgrade-advisor recommend` to fold these in")
+
+
+def cmd_probe_robust(args):
+    """Robustness probe (fix #5): perturbed inputs, unchanged gold; frozen
+    vs reference accuracy under noise."""
+    from .evaluate import evaluate
+    from .perturb import perturb_file
+    c = _cfg(args.config)
+    wd = _wd(c, args.target)
+    pert = os.path.join(wd, "test_perturbed.jsonl")
+    info = perturb_file(c["test_set"], pert)
+    print(f"perturbed {info['n']} items ({'/'.join(info['menu'])})")
+    common = dict(data_path=pert, task_kind=c["task_kind"],
+                  system_default=c["system_prompt"],
+                  plain=c.get("plain_format", False),
+                  comparator=_comparator(c, args.config))
+    fz = evaluate(c["source_base"], adapter=c["adapter"],
+                  out_records=os.path.join(wd, "freeze_perturbed.jsonl"),
+                  **common)
+    out = {"perturbations": info["menu"],
+           "freeze_perturbed": fz["accuracy"]}
+    ref_ad = os.path.join(wd, "reference_adapter")
+    if os.path.isdir(ref_ad):
+        rf = evaluate(args.target, adapter=ref_ad,
+                      out_records=os.path.join(wd, "reference_perturbed.jsonl"),
+                      **common)
+        out["reference_perturbed"] = rf["accuracy"]
+        out["robustness_delta_pp"] = round(
+            (rf["accuracy"] - fz["accuracy"]) * 100, 2)
+    with open(os.path.join(wd, "robust_summary.json"), "w",
+              encoding="utf-8") as f:
+        json.dump(out, f, ensure_ascii=False, indent=2)
+    print(json.dumps(out, ensure_ascii=False))
+    print("rerun `upgrade-advisor recommend` to fold these in")
+
+
 def cmd_gate(args):
     c = _cfg(args.config)
     serving = F.load_records(args.serving)
     cand = F.load_records(args.candidate)
-    rep = F.flips(serving, cand, half="report")
+    weights = c.get("class_weights") or {}
+    if weights:
+        rep = F.weighted_flips(args.serving, args.candidate, weights,
+                               half="report")
+        print("[severity-weighted flips]")
+    else:
+        rep = F.flips(serving, cand, half="report")
     budget = c.get("flip_budget", 0.03)
     ok = F.passes(rep, budget)
     print(json.dumps(rep.as_dict(), indent=2))
@@ -468,6 +588,13 @@ def main():
         p.set_defaults(f=fn)
     p = sub.add_parser("manifest"); p.add_argument("config")
     p.set_defaults(f=cmd_manifest)
+    p = sub.add_parser("probe-conf"); p.add_argument("config")
+    p.add_argument("--target", required=True)
+    p.add_argument("--labels", default=None)
+    p.set_defaults(f=cmd_probe_conf)
+    p = sub.add_parser("probe-robust"); p.add_argument("config")
+    p.add_argument("--target", required=True)
+    p.set_defaults(f=cmd_probe_robust)
     p = sub.add_parser("gate"); p.add_argument("config")
     p.add_argument("--serving", required=True, help="records jsonl of serving system")
     p.add_argument("--candidate", required=True)
