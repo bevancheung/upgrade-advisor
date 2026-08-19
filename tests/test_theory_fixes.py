@@ -20,7 +20,8 @@ def test_inconclusive_when_underpowered():
     r = recommend(_m(freeze_score=0.970, reference_score=0.975,
                      gate_set_size=100, paired_n=100, paired_n01=3,
                      paired_n10=2, paired_freeze_errors=3))
-    assert r.action == Action.INCONCLUSIVE
+    assert r.action == Action.COLLECT
+    assert r.verdict == "unresolved"
     assert any("cannot resolve" in x for x in r.reasons)
     assert r.evidence["leaning"] in ("lean-freeze", "lean-upgrade")
     assert "excluded_gain_above_pp" in r.evidence
@@ -46,7 +47,8 @@ def test_zero_discordance_rule_of_three():
     r2 = recommend(_m(freeze_score=0.9939, reference_score=0.9939,
                       gate_set_size=163, paired_n=163, paired_n01=0,
                       paired_n10=0, paired_freeze_errors=1))
-    assert r2.action == Action.INCONCLUSIVE
+    assert r2.action == Action.COLLECT
+    assert r2.verdict == "unresolved"
 
 
 def test_established_gain_opens_waterfall():
@@ -64,7 +66,8 @@ def test_point_above_epsilon_but_straddling_ci_stays_inconclusive():
     r = recommend(_m(freeze_score=0.98, reference_score=1.0,
                      gate_set_size=100, paired_n=100, paired_n01=2,
                      paired_n10=0, paired_freeze_errors=2))
-    assert r.action == Action.INCONCLUSIVE
+    assert r.action == Action.COLLECT
+    assert r.verdict == "unresolved"
     assert r.evidence["leaning"] == "lean-upgrade"
 
 
@@ -150,3 +153,32 @@ def test_weighted_flips():
         rep = weighted_flips(a, b, {"hi": 5.0, "lo": 1.0}, half="all")
         # 总权重 5*5+5*1=30；负翻转: id0(hi,w5)+id9(lo,w1)=6 -> NFR=0.2
         assert abs(rep.nfr - 6 / 30) < 1e-9
+
+
+def test_posterior_wait_vs_collect():
+    # 论文语料先验（fresh: mu=0.82pp, sd=2.4pp）+ 负向观测 → P(gain>eps)<10%
+    # → WAIT；正向观测 → COLLECT 且带后验概率
+    kw = dict(freeze_score=0.98, reference_score=0.98, gate_set_size=400,
+              prior_mu=0.0082, prior_sd=0.024, sigma_seed=0.0012)
+    r_neg = recommend(_m(paired_n=200, paired_n01=2, paired_n10=5,
+                         paired_freeze_errors=8, **kw))
+    assert r_neg.action == Action.WAIT
+    assert r_neg.verdict == "unresolved"
+    assert r_neg.evidence["posterior"]["p_gain_above_eps"] < 0.10
+    r_pos = recommend(_m(paired_n=400, paired_n01=5, paired_n10=1,
+                         paired_freeze_errors=8, **kw))
+    assert r_pos.action == Action.COLLECT
+    assert r_pos.evidence["posterior"]["p_gain_above_eps"] >= 0.10
+
+
+def test_economic_epsilon_drives_decision_band():
+    # 高流量组织：econ eps=0.1pp << 任务 eps → 同样证据下 P(gain>eps_dec) 变大
+    kw = dict(freeze_score=0.98, reference_score=0.985, gate_set_size=400,
+              paired_n=400, paired_n01=4, paired_n10=1,
+              paired_freeze_errors=8, prior_mu=0.0082, prior_sd=0.024)
+    r_hi = recommend(_m(economic_epsilon=0.001, **kw))
+    r_lo = recommend(_m(economic_epsilon=0.05, **kw))
+    p_hi = r_hi.evidence["posterior"]["p_gain_above_eps"]
+    p_lo = r_lo.evidence["posterior"]["p_gain_above_eps"]
+    assert p_hi > p_lo
+    assert r_hi.evidence["decision_epsilon_pp"] == 0.1

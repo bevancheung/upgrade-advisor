@@ -26,7 +26,12 @@ class Action(str, Enum):
     COPY = "copy"
     REFRESH = "refresh"
     RETRAIN = "retrain"
-    INCONCLUSIVE = "inconclusive"   # gate set cannot resolve epsilon (fix #2)
+    INCONCLUSIVE = "inconclusive"   # legacy label; unresolved now maps to
+    COLLECT = "collect"             # ...label the disagreement set (cheap
+    #                                 evidence with a priced convergence plan)
+    WAIT = "wait"                   # ...posterior says the gain is unlikely
+    #                                 to clear epsilon; hold until the next
+    #                                 release rather than spend on evidence
 
 
 # Relative-error-reduction gate (theory-review fix #1): near the accuracy
@@ -73,12 +78,24 @@ class Measurements:
     paired_n01: int = 0
     paired_n10: int = 0
     paired_freeze_errors: int = 0   # frozen-specialist errors on the pool
+    # empirical-Bayes layer (review-2): prior over the true gain from the
+    # UpgradeBench corpus (per edge kind), and the seed-to-seed training
+    # variance folded into the observation noise
+    prior_mu: Optional[float] = None       # accuracy scale (0.008 = 0.8pp)
+    prior_sd: Optional[float] = None
+    sigma_seed: float = 0.0
+    # decision-relevant epsilon from volume/costs (falls back to task eps)
+    economic_epsilon: Optional[float] = None
 
 
 @dataclass
 class Recommendation:
     action: Action
     epsilon: float
+    # epistemic verdict, separated from the operational action (review-2):
+    # what the evidence establishes vs what to do about it
+    verdict: str = ""   # gain-established | equivalence | unresolved |
+    #                     no-reference
     reasons: list = field(default_factory=list)
     warnings: list = field(default_factory=list)
     evidence: dict = field(default_factory=dict)
@@ -105,6 +122,7 @@ def recommend(m: Measurements, flip_budget: Optional[float] = None) -> Recommend
 
     # ---- Step 1: opportunity gate ----------------------------------------
     if m.reference_score is None:
+        r.verdict = "no-reference"
         r.reasons.append(
             "no reference score (measured or beta-estimated); without an "
             "upgrade-opportunity estimate the default is FREEZE, revisit "
@@ -168,12 +186,14 @@ def recommend(m: Measurements, flip_budget: Optional[float] = None) -> Recommend
         # post-hoc MDE was the wrong instrument -- the data's own interval
         # already says what is established, excluded, or unresolved ----
         if lo > eps:
+            r.verdict = "gain-established"
             r.reasons.append(
                 f"upgrade opportunity established: the pooled paired CI "
                 f"[{lo*100:+.1f}, {hi*100:+.1f}]pp lies entirely above "
                 f"epsilon ({eps*100:.0f}pp) on n={n} paired records "
                 f"({n01} fixes vs {n10} breaks)")
         elif rer_opens:
+            r.verdict = "gain-established"
             r.reasons.append(
                 f"absolute gain {gain*100:.2f}pp does not clear epsilon on "
                 f"its own, but the reference removes {rer:.0%} of the "
@@ -184,6 +204,7 @@ def recommend(m: Measurements, flip_budget: Optional[float] = None) -> Recommend
                 "(bounded-metric compression), so the upgrade waterfall "
                 "opens")
         elif hi < eps:
+            r.verdict = "equivalence"
             r.reasons.append(
                 f"equivalence established, FREEZE is a verdict not a "
                 f"default: the pooled paired CI [{lo*100:+.1f}, "
@@ -197,23 +218,50 @@ def recommend(m: Measurements, flip_budget: Optional[float] = None) -> Recommend
             pi = (n01 + n10) / n
             n_req = _S.required_n(pi, eps) if pi > 0 else None
             leaning = ("lean-freeze" if gain <= eps / 2 else "lean-upgrade")
-            r.action = Action.INCONCLUSIVE
+            r.verdict = "unresolved"
             r.evidence["leaning"] = leaning
-            r.reasons.append(
+            eps_dec = m.economic_epsilon or eps
+            r.evidence["decision_epsilon_pp"] = round(eps_dec * 100, 3)
+            post = None
+            if m.prior_mu is not None and m.prior_sd:
+                pm, ps = _S.posterior_gain(n, n01, n10, m.prior_mu,
+                                           m.prior_sd, m.sigma_seed)
+                post = _S.gain_probabilities(pm, ps, eps_dec)
+                r.evidence["posterior"] = {
+                    "post_mu_pp": round(pm * 100, 2),
+                    "post_sd_pp": round(ps * 100, 2), **post}
+            base_msg = (
                 f"the pooled evidence cannot resolve epsilon: CI "
                 f"[{lo*100:+.1f}, {hi*100:+.1f}]pp straddles "
                 f"{eps*100:.0f}pp (n={n}, {n01} fixes vs {n10} breaks; "
                 f"gains above {hi*100:.1f}pp are already excluded; "
-                f"leaning: {leaning})."
-                + (f" Resolving epsilon by i.i.d. sampling needs roughly "
-                   f"n={n_req}; labeling only disagreement items "
-                   "(`upgrade-advisor probe-disagree`) gets there orders "
-                   "of magnitude cheaper." if n_req else "")
-                + " Operational stance until then: keep serving the "
-                "frozen specialist")
+                f"leaning: {leaning})")
+            if post and post["p_gain_above_eps"] < 0.10:
+                r.action = Action.WAIT
+                r.reasons.append(
+                    base_msg + f". Under the UpgradeBench corpus prior the "
+                    f"posterior gives the gain a "
+                    f"{post['p_gain_above_eps']:.0%} chance of clearing the "
+                    f"decision epsilon ({eps_dec*100:.2f}pp) -- more "
+                    "evidence is unlikely to change the call, so hold the "
+                    "frozen specialist and revisit at the next release")
+                return r
+            r.action = Action.COLLECT
+            r.reasons.append(
+                base_msg
+                + (f"; posterior chance the gain clears the decision "
+                   f"epsilon: {post['p_gain_above_eps']:.0%}"
+                   if post else "")
+                + ". Cheapest resolution: label the disagreement set "
+                "(`upgrade-advisor probe-disagree` writes it with a priced "
+                "convergence plan)"
+                + (f"; resolving by i.i.d. sampling would need roughly "
+                   f"n={n_req}" if n_req else "")
+                + ". Keep serving the frozen specialist while collecting")
             return r
     else:
         if rer_opens and gain <= eps + 1e-9:
+            r.verdict = "gain-established"
             r.reasons.append(
                 f"absolute gain {gain*100:.2f}pp is within epsilon, but "
                 f"the reference removes {rer:.0%} of the frozen "
@@ -222,6 +270,7 @@ def recommend(m: Measurements, flip_budget: Optional[float] = None) -> Recommend
                 "decision-relevant one (bounded-metric compression), so "
                 "the upgrade waterfall opens")
         if gain <= eps + 1e-9 and not rer_opens:
+            r.verdict = "point-only"
             r.reasons.append(
                 f"retraining reference beats the frozen specialist by "
                 f"{gain*100:.2f}pp <= epsilon ({eps*100:.0f}pp)"
@@ -233,6 +282,8 @@ def recommend(m: Measurements, flip_budget: Optional[float] = None) -> Recommend
                     "reference was beta-estimated, not trained; log the "
                     "trained reference when convenient")
             return r
+    if not r.verdict:
+        r.verdict = "gain-established"
     # From here the waterfall is open. With pooled pairs that means either
     # lo > eps (gain established) or the RER gate passed its sign test --
     # a point estimate above epsilon with a straddling CI does NOT open it

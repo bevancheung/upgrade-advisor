@@ -208,6 +208,26 @@ def cmd_measure(args):
           f"{args.config} --target {args.target}")
 
 
+def _load_prior(edge_type, task_kind):
+    """UpgradeBench-corpus prior for the true upgrade gain, keyed by edge
+    kind. Returns None (no prior) for undocumented genealogy -- honesty
+    over borrowed strength."""
+    p = os.path.join(os.path.dirname(__file__), "..", "registry",
+                     "gain_prior.json")
+    if not os.path.exists(p):
+        return None
+    d = json.load(open(p, encoding="utf-8"))
+    bucket = {"fresh_pretraining": "fresh",
+              "continuation": "continuation"}.get(edge_type)
+    b = d.get("buckets", {}).get(bucket) if bucket else None
+    if not b or not b.get("sd_pp"):
+        return None
+    seed = d.get("sigma_seed", {}).get("by_task_kind", {}).get(task_kind, {})
+    return {"mu": b["mu_pp"] / 100, "sd": b["sd_pp"] / 100,
+            "sigma_seed": (seed.get("median_sd_pp") or 0) / 100,
+            "n_samples": b["n_samples"], "bucket": bucket}
+
+
 def cmd_recommend(args):
     c = _cfg(args.config)
     wd = _wd(c, args.target)
@@ -263,6 +283,20 @@ def cmd_recommend(args):
                                                                  pool_r)
         common = set(pool_f) & set(pool_r)
         m.paired_freeze_errors = sum(1 for i in common if not pool_f[i])
+        # empirical-Bayes prior from the UpgradeBench corpus, keyed by the
+        # documented edge kind (registry/gain_prior.json)
+        pr = _load_prior(ver.edge_type, c["task_kind"])
+        if pr:
+            m.prior_mu, m.prior_sd = pr["mu"], pr["sd"]
+            m.sigma_seed = pr["sigma_seed"]
+    # decision epsilon from volume/costs, when configured (review-2: the
+    # economic epsilon is the objective, not a footnote)
+    if all(c.get(k) for k in ("monthly_requests", "cost_per_error",
+                              "migration_cost")):
+        months = c.get("amortization_months") or 6
+        denom = c["monthly_requests"] * months * c["cost_per_error"]
+        if denom:
+            m.economic_epsilon = c["migration_cost"] / denom
     elif args.reference_estimate is not None:
         m.reference_score = args.reference_estimate
         m.reference_is_estimate = True
@@ -347,23 +381,20 @@ def cmd_recommend(args):
             k: d[k] for k in ("n_disagreements", "disagreement_rate",
                               "sign_test_p", "collection_plan")
             if k in d}
-    # ---- economic epsilon (fix #6) ----
-    if all(c.get(k) for k in ("monthly_requests", "cost_per_error",
-                              "migration_cost")):
-        months = c.get("amortization_months") or 6
-        denom = c["monthly_requests"] * months * c["cost_per_error"]
-        econ_eps = c["migration_cost"] / denom if denom else None
-        if econ_eps is not None:
-            rec.evidence["economic_epsilon_pp"] = round(econ_eps * 100, 3)
-            gain_now = rec.evidence.get("opportunity_pp")
-            if (gain_now is not None and gain_now / 100 > econ_eps
-                    and rec.action.value in ("freeze", "inconclusive")):
-                rec.warnings.append(
-                    f"economic epsilon ({econ_eps*100:.3f}pp break-even at "
-                    "your volume/costs) is below the statistical margin -- "
-                    "the observed gain would already pay for migration if "
-                    "it were statistically established; consider growing "
-                    "the gate set rather than dismissing the upgrade")
+    # ---- economic epsilon (fix #6; computed pre-decision above) ----
+    if m.economic_epsilon is not None:
+        econ_eps = m.economic_epsilon
+        rec.evidence["economic_epsilon_pp"] = round(econ_eps * 100, 3)
+        gain_now = rec.evidence.get("opportunity_pp")
+        if (gain_now is not None and gain_now / 100 > econ_eps
+                and rec.action.value in ("freeze", "inconclusive",
+                                         "collect", "wait")):
+            rec.warnings.append(
+                f"economic epsilon ({econ_eps*100:.3f}pp break-even at "
+                "your volume/costs) is below the statistical margin -- "
+                "the observed gain would already pay for migration if "
+                "it were statistically established; consider growing "
+                "the gate set rather than dismissing the upgrade")
 
     if c["task_kind"] == "classification":
         lm = {}

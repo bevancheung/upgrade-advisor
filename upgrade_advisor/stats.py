@@ -5,6 +5,7 @@ Ported from the UpgradeBench harness: exact McNemar on discordant pairs,
 percentile bootstrap on per-example records. Pure python + stdlib.
 """
 import json
+import math
 import random
 import re
 from fractions import Fraction
@@ -120,6 +121,38 @@ def paired_gain_ci(n: int, n01: int, n10: int, z: float = 1.96
     se = ((nd - (n01 - n10) ** 2 / n) ** 0.5) / n
     half = z * se + 1.0 / n
     return d - half, d + half
+
+
+def normal_cdf(x: float) -> float:
+    return 0.5 * (1.0 + math.erf(x / math.sqrt(2.0)))
+
+
+def posterior_gain(n: int, n01: int, n10: int, prior_mu: float,
+                   prior_sd: float, sigma_seed: float = 0.0
+                   ) -> Tuple[float, float]:
+    """Empirical-Bayes posterior over the true upgrade gain (normal-normal
+    conjugate). Likelihood: observed paired difference with variance =
+    sampling variance of the discordant counts (continuity-corrected so
+    zero discordance stays finite) + seed-to-seed training variance (the
+    reference is one draw of a stochastic training run). Prior: the
+    UpgradeBench corpus distribution of specialist-score deltas for this
+    edge kind. Returns (posterior mean, posterior sd) on the accuracy
+    scale."""
+    d_hat = (n01 - n10) / n
+    se2 = (n01 + n10 + 0.5) / n ** 2 + sigma_seed ** 2
+    tau2 = max(prior_sd, 1e-6) ** 2
+    w = 1.0 / se2 + 1.0 / tau2
+    mu = (d_hat / se2 + prior_mu / tau2) / w
+    return mu, (1.0 / w) ** 0.5
+
+
+def gain_probabilities(mu: float, sd: float, eps: float) -> dict:
+    """P(gain > eps), P(gain < -eps), P(|gain| <= eps) under N(mu, sd)."""
+    p_up = 1.0 - normal_cdf((eps - mu) / sd)
+    p_down = normal_cdf((-eps - mu) / sd)
+    return {"p_gain_above_eps": round(p_up, 3),
+            "p_loss_below_neg_eps": round(p_down, 3),
+            "p_within_band": round(1.0 - p_up - p_down, 3)}
 
 
 def sign_test_p(n01: int, n10: int) -> float:

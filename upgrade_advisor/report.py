@@ -7,7 +7,8 @@ def render_report(cfg, target, verdict, m, rec):
     a = lines.append
     a(f"# Upgrade recommendation: `{cfg['task_name']}` -> `{target}`")
     a("")
-    a(f"## Action: **{rec.action.value.upper()}**")
+    a(f"## Action: **{rec.action.value.upper()}**"
+      + (f" (verdict: {rec.verdict})" if getattr(rec, "verdict", "") else ""))
     a("")
     a("## Evidence")
     a(f"- frozen specialist (gate half, n={m.gate_set_size}): "
@@ -44,6 +45,14 @@ def render_report(cfg, target, verdict, m, rec):
                 lo, hi = ev[k]
                 a(f"- {tag} - reference: 95% CI [{lo:+.2f}, {hi:+.2f}]pp, "
                   f"p = {ev[f'{tag}_vs_reference_p']}")
+    if "posterior" in ev:
+        po = ev["posterior"]
+        a(f"- posterior over the true gain (UpgradeBench-corpus prior + "
+          f"paired evidence): mean {po['post_mu_pp']:+.2f}pp, sd "
+          f"{po['post_sd_pp']:.2f}pp; P(gain > decision epsilon) = "
+          f"{po['p_gain_above_eps']:.0%}, P(regression beyond epsilon) = "
+          f"{po['p_loss_below_neg_eps']:.0%}, P(within band) = "
+          f"{po['p_within_band']:.0%}")
     if "paired_evidence" in ev:
         pe = ev["paired_evidence"]
         ci = ev.get("opportunity_ci_pooled_pp")

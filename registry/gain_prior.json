@@ -1,0 +1,259 @@
+{
+  "provenance": {
+    "source": "E:\\dataset\\records\\summary_all.json",
+    "rule": "delta = expert(target) - expert(source), same task, primary rows (no seed suffix, no _constr); pairs per registry/release_graph.yaml edge kinds",
+    "paper": "UpgradeBench (2026), 193 measured eval cells"
+  },
+  "buckets": {
+    "fresh": {
+      "n_samples": 16,
+      "mu_pp": 0.82,
+      "sd_pp": 2.4,
+      "samples": [
+        {
+          "task": "banking77",
+          "task_kind": "classification",
+          "pair": "q15->q2",
+          "delta_pp": -0.26
+        },
+        {
+          "task": "banking77",
+          "task_kind": "classification",
+          "pair": "q2->q25",
+          "delta_pp": 0.36
+        },
+        {
+          "task": "clinc150",
+          "task_kind": "classification",
+          "pair": "q2->q25",
+          "delta_pp": 0.53
+        },
+        {
+          "task": "finqa",
+          "task_kind": "structured",
+          "pair": "q2->q25",
+          "delta_pp": 0.09
+        },
+        {
+          "task": "glaive",
+          "task_kind": "structured",
+          "pair": "q2->q25",
+          "delta_pp": -0.2
+        },
+        {
+          "task": "clinc150",
+          "task_kind": "classification",
+          "pair": "q25->q3",
+          "delta_pp": -1.42
+        },
+        {
+          "task": "finqa",
+          "task_kind": "structured",
+          "pair": "q25->q3",
+          "delta_pp": 1.13
+        },
+        {
+          "task": "glaive",
+          "task_kind": "structured",
+          "pair": "q25->q3",
+          "delta_pp": 0.1
+        },
+        {
+          "task": "banking77",
+          "task_kind": "classification",
+          "pair": "q15->q25",
+          "delta_pp": 0.1
+        },
+        {
+          "task": "clinc150",
+          "task_kind": "classification",
+          "pair": "q2->q3",
+          "delta_pp": -0.89
+        },
+        {
+          "task": "finqa",
+          "task_kind": "structured",
+          "pair": "q2->q3",
+          "delta_pp": 1.22
+        },
+        {
+          "task": "glaive",
+          "task_kind": "structured",
+          "pair": "q2->q3",
+          "delta_pp": -0.1
+        },
+        {
+          "task": "banking77",
+          "task_kind": "classification",
+          "pair": "olmo1->olmo17",
+          "delta_pp": 4.97
+        },
+        {
+          "task": "clinc150",
+          "task_kind": "classification",
+          "pair": "olmo1->olmo17",
+          "delta_pp": 8.15
+        },
+        {
+          "task": "banking77",
+          "task_kind": "classification",
+          "pair": "olmo17->o2main",
+          "delta_pp": -0.36
+        },
+        {
+          "task": "clinc150",
+          "task_kind": "classification",
+          "pair": "olmo17->o2main",
+          "delta_pp": -0.26
+        }
+      ]
+    },
+    "continuation": {
+      "n_samples": 6,
+      "mu_pp": 0.51,
+      "sd_pp": 0.66,
+      "samples": [
+        {
+          "task": "banking77",
+          "task_kind": "classification",
+          "pair": "o2s237->o2s248",
+          "delta_pp": 0.26
+        },
+        {
+          "task": "clinc150",
+          "task_kind": "classification",
+          "pair": "o2s237->o2s248",
+          "delta_pp": 0.16
+        },
+        {
+          "task": "banking77",
+          "task_kind": "classification",
+          "pair": "o2s237->o2s928",
+          "delta_pp": 0.1
+        },
+        {
+          "task": "clinc150",
+          "task_kind": "classification",
+          "pair": "o2s237->o2s928",
+          "delta_pp": 1.42
+        },
+        {
+          "task": "banking77",
+          "task_kind": "classification",
+          "pair": "o2s248->o2s928",
+          "delta_pp": -0.16
+        },
+        {
+          "task": "clinc150",
+          "task_kind": "classification",
+          "pair": "o2s248->o2s928",
+          "delta_pp": 1.26
+        }
+      ]
+    }
+  },
+  "sigma_seed": {
+    "per_family": [
+      {
+        "task": "banking77",
+        "task_kind": "classification",
+        "family": "q1m_oracle",
+        "n_seeds": 3,
+        "sd_pp": 0.09,
+        "spread_pp": 0.17
+      },
+      {
+        "task": "banking77",
+        "task_kind": "classification",
+        "family": "q25_expert",
+        "n_seeds": 3,
+        "sd_pp": 0.12,
+        "spread_pp": 0.23
+      },
+      {
+        "task": "banking77",
+        "task_kind": "classification",
+        "family": "q3_refreshD",
+        "n_seeds": 3,
+        "sd_pp": 0.05,
+        "spread_pp": 0.1
+      },
+      {
+        "task": "clinc150",
+        "task_kind": "classification",
+        "family": "q2_expert",
+        "n_seeds": 3,
+        "sd_pp": 0.39,
+        "spread_pp": 0.75
+      },
+      {
+        "task": "clinc150",
+        "task_kind": "classification",
+        "family": "q3_expert",
+        "n_seeds": 3,
+        "sd_pp": 0.72,
+        "spread_pp": 1.33
+      },
+      {
+        "task": "spider",
+        "task_kind": "structured",
+        "family": "sp_q1m_oracle",
+        "n_seeds": 3,
+        "sd_pp": 1.41,
+        "spread_pp": 2.71
+      },
+      {
+        "task": "spider",
+        "task_kind": "structured",
+        "family": "sp_q25_expert",
+        "n_seeds": 3,
+        "sd_pp": 0.19,
+        "spread_pp": 0.38
+      },
+      {
+        "task": "spider",
+        "task_kind": "structured",
+        "family": "sp_q2_expert",
+        "n_seeds": 3,
+        "sd_pp": 0.91,
+        "spread_pp": 1.74
+      },
+      {
+        "task": "spider",
+        "task_kind": "structured",
+        "family": "sp_q3_lad1024",
+        "n_seeds": 3,
+        "sd_pp": 0.49,
+        "spread_pp": 0.97
+      },
+      {
+        "task": "xlam",
+        "task_kind": "structured",
+        "family": "xl_q1m_oracle",
+        "n_seeds": 3,
+        "sd_pp": 0.4,
+        "spread_pp": 0.75
+      },
+      {
+        "task": "xlam",
+        "task_kind": "structured",
+        "family": "xl_q25_expert",
+        "n_seeds": 3,
+        "sd_pp": 0.12,
+        "spread_pp": 0.2
+      }
+    ],
+    "by_task_kind": {
+      "classification": {
+        "n_families": 5,
+        "median_sd_pp": 0.12,
+        "mean_sd_pp": 0.27
+      },
+      "structured": {
+        "n_families": 6,
+        "median_sd_pp": 0.45,
+        "mean_sd_pp": 0.59
+      }
+    }
+  }
+}
