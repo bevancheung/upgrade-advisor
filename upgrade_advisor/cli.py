@@ -248,12 +248,21 @@ def cmd_recommend(args):
     ref_p = os.path.join(wd, "reference.jsonl")
     if os.path.exists(ref_p):
         m.reference_score, _ = gate_score("reference")
-        fz_rec_g = {i: v for i, v in
-                    F.load_records(os.path.join(wd, "freeze.jsonl")).items()
-                    if F.gate_half(i)}
-        rf_rec_g = {i: v for i, v in F.load_records(ref_p).items()
-                    if F.gate_half(i)}
-        m.discordant_rate = S.discordant_rate(fz_rec_g, rf_rec_g)
+        # 池化全部配对证据（review-2）：val 与 test 的每一条配对记录都进
+        # 判定；suffix 前缀隔离两个样本集的 id 空间，配对只发生在同集合内。
+        pool_f, pool_r = {}, {}
+        for suf in ("", "_val"):
+            fp2 = os.path.join(wd, f"freeze{suf}.jsonl")
+            rp2 = os.path.join(wd, f"reference{suf}.jsonl")
+            if os.path.exists(fp2) and os.path.exists(rp2):
+                for i, v in F.load_records(fp2).items():
+                    pool_f[f"{suf}:{i}"] = v
+                for i, v in F.load_records(rp2).items():
+                    pool_r[f"{suf}:{i}"] = v
+        m.paired_n, m.paired_n01, m.paired_n10 = S.paired_counts(pool_f,
+                                                                 pool_r)
+        common = set(pool_f) & set(pool_r)
+        m.paired_freeze_errors = sum(1 for i in common if not pool_f[i])
     elif args.reference_estimate is not None:
         m.reference_score = args.reference_estimate
         m.reference_is_estimate = True

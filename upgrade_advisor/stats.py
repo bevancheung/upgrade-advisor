@@ -93,6 +93,46 @@ def mcnemar(a: Dict[str, bool], b: Dict[str, bool]
     return b01, c10, min(1.0, float(p))
 
 
+def paired_counts(a: Dict[str, bool], b: Dict[str, bool]
+                  ) -> Tuple[int, int, int]:
+    """(n, n01, n10) over common ids: n01 = items a gets wrong and b fixes,
+    n10 = items a gets right and b breaks. The decision-relevant evidence
+    lives entirely in these discordant pairs."""
+    ids = sorted(set(a) & set(b))
+    n01 = sum(1 for i in ids if not a[i] and b[i])
+    n10 = sum(1 for i in ids if a[i] and not b[i])
+    return len(ids), n01, n10
+
+
+def paired_gain_ci(n: int, n01: int, n10: int, z: float = 1.96
+                   ) -> Tuple[float, float]:
+    """95% CI for the paired accuracy difference (b - a) from discordant
+    counts, with a continuity correction. Zero discordance is itself strong
+    evidence: the rule-of-three bound |diff| <= 3.69/n (95%, two-sided via
+    one-sided 97.5% on the discordance rate) replaces a degenerate CI."""
+    if n <= 0:
+        return -1.0, 1.0
+    nd = n01 + n10
+    if nd == 0:
+        b = 3.69 / n
+        return -b, b
+    d = (n01 - n10) / n
+    se = ((nd - (n01 - n10) ** 2 / n) ** 0.5) / n
+    half = z * se + 1.0 / n
+    return d - half, d + half
+
+
+def sign_test_p(n01: int, n10: int) -> float:
+    """Exact two-sided binomial sign test on the discordant pairs (the
+    McNemar exact test, taking counts directly)."""
+    n = n01 + n10
+    if n == 0:
+        return 1.0
+    tail = sum(comb(n, j) for j in range(0, min(n01, n10) + 1))
+    p = 2 * tail * Fraction(1, 2 ** n)
+    return min(1.0, float(p))
+
+
 # ---------------- Power layer (theory-review fix #2) ----------------
 
 def discordant_rate(a: Dict[str, bool], b: Dict[str, bool]) -> float:

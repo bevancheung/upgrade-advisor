@@ -16,11 +16,56 @@ def _m(**kw):
 
 
 def test_inconclusive_when_underpowered():
-    # n=100, pi=0.05 -> MDE~6.3pp >> eps=1pp; 观察差 0.5pp 在噪声底内
+    # 池化 n=100，3修/2破：gain=1pp，CI 横跨 eps → 未决 + 倾向 + 排除界
     r = recommend(_m(freeze_score=0.970, reference_score=0.975,
-                     gate_set_size=100, discordant_rate=0.05))
+                     gate_set_size=100, paired_n=100, paired_n01=3,
+                     paired_n10=2, paired_freeze_errors=3))
     assert r.action == Action.INCONCLUSIVE
     assert any("cannot resolve" in x for x in r.reasons)
+    assert r.evidence["leaning"] in ("lean-freeze", "lean-upgrade")
+    assert "excluded_gain_above_pp" in r.evidence
+
+
+def test_equivalence_is_a_verdict_not_a_default():
+    # 池化 n=2000，2修/2破：CI [-0.25,+0.25]pp，上界<eps → 确证 FREEZE
+    r = recommend(_m(freeze_score=0.97, reference_score=0.97,
+                     gate_set_size=2000, paired_n=2000, paired_n01=2,
+                     paired_n10=2, paired_freeze_errors=60))
+    assert r.action == Action.FREEZE
+    assert any("equivalence established" in x for x in r.reasons)
+
+
+def test_zero_discordance_rule_of_three():
+    # 零不一致：n=500 → 排除界 3.69/500=0.74pp < eps → 确证 FREEZE
+    r = recommend(_m(freeze_score=0.99, reference_score=0.99,
+                     gate_set_size=500, paired_n=500, paired_n01=0,
+                     paired_n10=0, paired_freeze_errors=5))
+    assert r.action == Action.FREEZE
+    assert any("agree on every pooled item" in x for x in r.reasons)
+    # AirOne 型：n=163 → 排除界 2.26pp > eps → 未决（不是确证平局）
+    r2 = recommend(_m(freeze_score=0.9939, reference_score=0.9939,
+                      gate_set_size=163, paired_n=163, paired_n01=0,
+                      paired_n10=0, paired_freeze_errors=1))
+    assert r2.action == Action.INCONCLUSIVE
+
+
+def test_established_gain_opens_waterfall():
+    # n=2000，60修/10破：gain=2.5pp，CI 下界 ~1.6pp > eps → 瀑布(RETRAIN)
+    r = recommend(_m(freeze_score=0.95, reference_score=0.975,
+                     gate_set_size=2000, paired_n=2000, paired_n01=60,
+                     paired_n10=10, paired_freeze_errors=100))
+    assert r.action == Action.RETRAIN
+    assert any("opportunity established" in x for x in r.reasons)
+
+
+def test_point_above_epsilon_but_straddling_ci_stays_inconclusive():
+    # 旧不对称的病例：点估计 2pp > eps 但只有 2修/0破（AirOne 病理）
+    # → 不再直接 RETRAIN，而是未决+偏升级
+    r = recommend(_m(freeze_score=0.98, reference_score=1.0,
+                     gate_set_size=100, paired_n=100, paired_n01=2,
+                     paired_n10=0, paired_freeze_errors=2))
+    assert r.action == Action.INCONCLUSIVE
+    assert r.evidence["leaning"] == "lean-upgrade"
 
 
 def test_powered_null_stays_freeze():
@@ -37,6 +82,22 @@ def test_rer_gate_opens_waterfall_near_ceiling():
                      gate_set_size=2000, discordant_rate=0.02))
     assert r.action == Action.RETRAIN
     assert any("error-rate scale" in x for x in r.reasons)
+
+
+def test_rer_gate_requires_sign_test_with_pairs():
+    # RER=50%、错误数 12 条，但 6修/0破 的方向显著(p=2*0.5^6=0.031<0.05) → 开门
+    r = recommend(_m(freeze_score=0.988, reference_score=0.994,
+                     gate_set_size=1000, paired_n=1000, paired_n01=6,
+                     paired_n10=0, paired_freeze_errors=12))
+    assert r.action == Action.RETRAIN
+    # 同 RER 但 4修/0破 (p=0.125) → 方向未确立不开门；且 CI 上界 0.89pp<eps
+    # → 数据已排除有意义增益 → 确证 FREEZE（附饱和警告）
+    r2 = recommend(_m(freeze_score=0.992, reference_score=0.996,
+                      gate_set_size=1000, paired_n=1000, paired_n01=4,
+                      paired_n10=0, paired_freeze_errors=8))
+    assert r2.action == Action.FREEZE
+    assert any("equivalence established" in x for x in r2.reasons)
+    assert any("EVAL-SATURATED" in w for w in r2.warnings)
 
 
 def test_rer_gate_needs_error_mass():

@@ -66,6 +66,13 @@ class Measurements:
     # power layer (fix #2): freeze-vs-reference disagreement rate on the
     # gate set, when the reference is measured (None for estimates)
     discordant_rate: Optional[float] = None
+    # pooled paired evidence (review-2 fix: pool every paired record --
+    # val and test -- instead of judging on one fragment): n common items,
+    # n01 = frozen wrong & reference right, n10 = frozen right & ref wrong
+    paired_n: int = 0
+    paired_n01: int = 0
+    paired_n10: int = 0
+    paired_freeze_errors: int = 0   # frozen-specialist errors on the pool
 
 
 @dataclass
@@ -103,13 +110,34 @@ def recommend(m: Measurements, flip_budget: Optional[float] = None) -> Recommend
             "upgrade-opportunity estimate the default is FREEZE, revisit "
             "after logging one more release")
         return r
-    gain = m.reference_score - m.freeze_score
+    # Pooled paired evidence takes precedence over the gate-fragment point
+    # estimate: the decision uses every paired record the episode holds.
+    have_pairs = m.paired_n > 0 and not m.reference_is_estimate
+    if have_pairs:
+        from . import stats as _S
+        n, n01, n10 = m.paired_n, m.paired_n01, m.paired_n10
+        gain = (n01 - n10) / n
+        lo, hi = _S.paired_gain_ci(n, n01, n10)
+        r.evidence["paired_evidence"] = {
+            "n": n, "reference_fixes": n01, "reference_breaks": n10}
+        r.evidence["opportunity_ci_pooled_pp"] = [round(lo * 100, 2),
+                                                  round(hi * 100, 2)]
+        r.evidence["excluded_gain_above_pp"] = round(hi * 100, 2)
+    else:
+        gain = m.reference_score - m.freeze_score
+        lo = hi = None
     r.evidence["opportunity_pp"] = round(gain * 100, 2)
 
-    # ---- error-scale view (fix #1) ----
-    err_f = 1.0 - m.freeze_score
-    err_r = 1.0 - m.reference_score
-    freeze_errors = round(err_f * m.gate_set_size) if m.gate_set_size else None
+    # ---- error-scale view (fix #1), pooled when possible ----
+    if have_pairs:
+        freeze_errors = max(m.paired_freeze_errors, n01)
+        err_f = freeze_errors / n
+        err_r = (freeze_errors - n01 + n10) / n
+    else:
+        err_f = 1.0 - m.freeze_score
+        err_r = 1.0 - m.reference_score
+        freeze_errors = (round(err_f * m.gate_set_size)
+                         if m.gate_set_size else None)
     rer = (err_f - err_r) / err_f if err_f > 1e-12 else None
     if rer is not None:
         r.evidence["opportunity_rer"] = round(rer, 3)
@@ -122,51 +150,94 @@ def recommend(m: Measurements, flip_budget: Optional[float] = None) -> Recommend
     if saturated:
         r.warnings.append(
             f"EVAL-SATURATED: the frozen specialist makes only "
-            f"{freeze_errors} error(s) on the gate set -- any upgrade "
-            "comparison rests on that many items. Harvest hard/tail "
+            f"{freeze_errors} error(s) on the pooled evidence -- any "
+            "upgrade comparison rests on that many items. Harvest hard/tail "
             "examples (e.g. production misroutes) before trusting an "
             "upgrade verdict here")
 
-    # ---- opportunity decision: absolute-pp OR relative-error gate ----
+    # ---- error-scale gate (fix #1): now requires the direction to be
+    # statistically established on the discordant set, not just a large
+    # relative reduction over a handful of errors ----
     rer_opens = (rer is not None and rer >= RER_THRESHOLD and gain > 0
                  and freeze_errors is not None
-                 and freeze_errors >= RER_MIN_ERRORS)
-    if rer_opens and gain <= eps + 1e-9:
-        r.reasons.append(
-            f"absolute gain {gain*100:.2f}pp is within epsilon, but the "
-            f"reference removes {rer:.0%} of the frozen specialist's errors "
-            f"({freeze_errors} errors on the gate set) -- near the accuracy "
-            "ceiling the error-rate scale is the decision-relevant one "
-            "(bounded-metric compression), so the upgrade waterfall opens")
-    if gain <= eps + 1e-9 and not rer_opens:
-        # ---- power check before declaring a null (fix #2) ----
-        if (not m.reference_is_estimate and m.discordant_rate is not None
-                and m.gate_set_size):
-            from . import stats as _S
-            mde_pp = _S.mde(m.discordant_rate, m.gate_set_size)
-            r.evidence["mde_pp"] = round(mde_pp * 100, 2)
-            if mde_pp > eps and abs(gain) < mde_pp:
-                n_req = _S.required_n(m.discordant_rate, eps)
-                r.action = Action.INCONCLUSIVE
-                r.reasons.append(
-                    f"the gate set cannot resolve this decision: minimal "
-                    f"detectable difference at n={m.gate_set_size} is "
-                    f"{mde_pp*100:.1f}pp (> epsilon {eps*100:.0f}pp) and the "
-                    f"observed gain {gain*100:.2f}pp is inside that noise "
-                    f"floor. Resolving epsilon needs roughly n={n_req}. "
-                    "Operational stance until then: keep serving the frozen "
-                    "specialist, and grow the gate set")
-                return r
-        r.reasons.append(
-            f"retraining reference beats the frozen specialist by "
-            f"{gain*100:.2f}pp <= epsilon ({eps*100:.0f}pp)"
-            + (f" with relative error reduction {rer:.0%} below the "
-               f"{RER_THRESHOLD:.0%} gate" if rer is not None else "")
-            + ": upgrading buys nothing measurable on this task")
-        if m.reference_is_estimate:
-            r.warnings.append("reference was beta-estimated, not trained; "
-                              "log the trained reference when convenient")
-        return r
+                 and freeze_errors >= RER_MIN_ERRORS
+                 and (not have_pairs or _S.sign_test_p(n01, n10) < 0.05))
+
+    if have_pairs:
+        # ---- three-zone equivalence verdict (TOST) on the observed CI:
+        # post-hoc MDE was the wrong instrument -- the data's own interval
+        # already says what is established, excluded, or unresolved ----
+        if lo > eps:
+            r.reasons.append(
+                f"upgrade opportunity established: the pooled paired CI "
+                f"[{lo*100:+.1f}, {hi*100:+.1f}]pp lies entirely above "
+                f"epsilon ({eps*100:.0f}pp) on n={n} paired records "
+                f"({n01} fixes vs {n10} breaks)")
+        elif rer_opens:
+            r.reasons.append(
+                f"absolute gain {gain*100:.2f}pp does not clear epsilon on "
+                f"its own, but the reference removes {rer:.0%} of the "
+                f"frozen specialist's errors ({freeze_errors} errors, "
+                f"{n01} fixes vs {n10} breaks, direction established by "
+                "exact sign test) -- near the accuracy ceiling the "
+                "error-rate scale is the decision-relevant one "
+                "(bounded-metric compression), so the upgrade waterfall "
+                "opens")
+        elif hi < eps:
+            r.reasons.append(
+                f"equivalence established, FREEZE is a verdict not a "
+                f"default: the pooled paired CI [{lo*100:+.1f}, "
+                f"{hi*100:+.1f}]pp excludes any gain above epsilon "
+                f"({eps*100:.0f}pp) -- n={n} paired records, "
+                f"{n01} fixes vs {n10} breaks"
+                + (" (the two systems agree on every pooled item)"
+                   if n01 + n10 == 0 else ""))
+            return r
+        else:
+            pi = (n01 + n10) / n
+            n_req = _S.required_n(pi, eps) if pi > 0 else None
+            leaning = ("lean-freeze" if gain <= eps / 2 else "lean-upgrade")
+            r.action = Action.INCONCLUSIVE
+            r.evidence["leaning"] = leaning
+            r.reasons.append(
+                f"the pooled evidence cannot resolve epsilon: CI "
+                f"[{lo*100:+.1f}, {hi*100:+.1f}]pp straddles "
+                f"{eps*100:.0f}pp (n={n}, {n01} fixes vs {n10} breaks; "
+                f"gains above {hi*100:.1f}pp are already excluded; "
+                f"leaning: {leaning})."
+                + (f" Resolving epsilon by i.i.d. sampling needs roughly "
+                   f"n={n_req}; labeling only disagreement items "
+                   "(`upgrade-advisor probe-disagree`) gets there orders "
+                   "of magnitude cheaper." if n_req else "")
+                + " Operational stance until then: keep serving the "
+                "frozen specialist")
+            return r
+    else:
+        if rer_opens and gain <= eps + 1e-9:
+            r.reasons.append(
+                f"absolute gain {gain*100:.2f}pp is within epsilon, but "
+                f"the reference removes {rer:.0%} of the frozen "
+                f"specialist's errors ({freeze_errors} errors) -- near the "
+                "accuracy ceiling the error-rate scale is the "
+                "decision-relevant one (bounded-metric compression), so "
+                "the upgrade waterfall opens")
+        if gain <= eps + 1e-9 and not rer_opens:
+            r.reasons.append(
+                f"retraining reference beats the frozen specialist by "
+                f"{gain*100:.2f}pp <= epsilon ({eps*100:.0f}pp)"
+                + (f" with relative error reduction {rer:.0%} below the "
+                   f"{RER_THRESHOLD:.0%} gate" if rer is not None else "")
+                + ": upgrading buys nothing measurable on this task")
+            if m.reference_is_estimate:
+                r.warnings.append(
+                    "reference was beta-estimated, not trained; log the "
+                    "trained reference when convenient")
+            return r
+    # From here the waterfall is open. With pooled pairs that means either
+    # lo > eps (gain established) or the RER gate passed its sign test --
+    # a point estimate above epsilon with a straddling CI does NOT open it
+    # (symmetric standard; the old asymmetry let a 2-item flip decide a
+    # RETRAIN).
 
     # ---- Step 2: copy gate (genealogy + distance + regression) -----------
     if m.shape_compatible and m.copy_score is not None:

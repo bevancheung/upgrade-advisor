@@ -44,6 +44,15 @@ def render_report(cfg, target, verdict, m, rec):
                 lo, hi = ev[k]
                 a(f"- {tag} - reference: 95% CI [{lo:+.2f}, {hi:+.2f}]pp, "
                   f"p = {ev[f'{tag}_vs_reference_p']}")
+    if "paired_evidence" in ev:
+        pe = ev["paired_evidence"]
+        ci = ev.get("opportunity_ci_pooled_pp")
+        a(f"- pooled paired evidence (val+test): n={pe['n']}, reference "
+          f"fixes {pe['reference_fixes']} frozen error(s) and breaks "
+          f"{pe['reference_breaks']} frozen pass(es)"
+          + (f"; 95% CI [{ci[0]:+.1f}, {ci[1]:+.1f}]pp -- gains above "
+             f"{ev['excluded_gain_above_pp']:.1f}pp are excluded by the "
+             "data" if ci else ""))
     if "mde_pp" in ev:
         a(f"- power: minimal detectable difference at this gate set = "
           f"{ev['mde_pp']}pp")
