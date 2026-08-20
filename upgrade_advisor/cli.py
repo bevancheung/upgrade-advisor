@@ -48,6 +48,9 @@ cost_per_error: null
 migration_cost: null
 amortization_months: 6
 class_weights: {}                # e.g. {report_lost_card: 5.0}
+# dossier narrative (optional): shown in sections 1 and 6 of `dossier`
+case_background: []              # paragraphs about the company/task
+case_notes: []                   # discussion points (e.g. vs last verdict)
 fewshot_k: 5                     # adoption floor also measured few-shot
 workdir: runs/my_task
 """
@@ -427,6 +430,30 @@ def cmd_recommend(args):
     rpt = os.path.join(wd, "recommendation.md")
     with open(rpt, "w", encoding="utf-8") as f:
         f.write(out)
+    # machine-readable verdict (consumed by `dossier` and any downstream
+    # tooling; every number the reports show lives here)
+    with open(os.path.join(wd, "evidence.json"), "w", encoding="utf-8") as f:
+        json.dump({
+            "task": c["task_name"], "target": args.target,
+            "action": rec.action.value, "verdict": rec.verdict,
+            "epsilon": rec.epsilon,
+            "genealogy": {"edge_type": ver.edge_type,
+                          "confidence": ver.confidence,
+                          "continuation_tokens": ver.continuation_tokens,
+                          "documented_continuation":
+                              ver.documented_continuation},
+            "measurements": {
+                "freeze_score": m.freeze_score, "adopt_floor": m.adopt_floor,
+                "reference_score": m.reference_score,
+                "reference_is_estimate": m.reference_is_estimate,
+                "gate_set_size": m.gate_set_size,
+                "paired_n": m.paired_n, "paired_n01": m.paired_n01,
+                "paired_n10": m.paired_n10,
+                "paired_freeze_errors": m.paired_freeze_errors,
+                "economic_epsilon": m.economic_epsilon},
+            "evidence": rec.evidence, "reasons": rec.reasons,
+            "warnings": rec.warnings,
+        }, f, ensure_ascii=False, indent=1, default=str)
     # executive briefs (review-3: the audience is often a budget owner, not
     # an engineer) -- same evidence, plain language, both languages, always
     from .exec_report import decision_card, render_exec
@@ -605,6 +632,25 @@ def cmd_probe_robust(args):
     print("rerun `upgrade-advisor recommend` to fold these in")
 
 
+def cmd_dossier(args):
+    """Assemble the complete decision memo (the case-dossier format
+    validated on the eleven industry studies): decision card, background,
+    asset/cost tables, the full evidence table with plain-language
+    readings, the executive brief, discussion, and the technical report
+    as an appendix. Zero GPU -- it reads what `recommend` already wrote.
+    Render to .docx with scripts/render_dossier_docx.js."""
+    from .dossier import build
+    c = _cfg(args.config)
+    wd = _wd(c, args.target)
+    if not os.path.exists(os.path.join(wd, "evidence.json")):
+        print("no evidence.json in the episode -- run `upgrade-advisor "
+              "recommend` first (it writes the machine-readable verdict)")
+        return
+    paths = build(wd, c, lang=args.lang)
+    for lg, p in paths.items():
+        print(f"[dossier ({lg}): {p}]")
+
+
 def cmd_probe_disagree(args):
     """COLLECT channel (review-2): the decision-relevant evidence lives in
     the items where the two systems disagree, and disagreement is visible
@@ -708,6 +754,10 @@ def main():
     p = sub.add_parser("probe-robust"); p.add_argument("config")
     p.add_argument("--target", required=True)
     p.set_defaults(f=cmd_probe_robust)
+    p = sub.add_parser("dossier"); p.add_argument("config")
+    p.add_argument("--target", required=True)
+    p.add_argument("--lang", default="both", choices=["en", "zh", "both"])
+    p.set_defaults(f=cmd_dossier)
     p = sub.add_parser("probe-disagree"); p.add_argument("config")
     p.add_argument("--target", required=True)
     p.add_argument("--inputs", default=None,

@@ -95,6 +95,14 @@ upgrade-advisor probe-conf   my_task.yaml --target ...    # confidence layer:
 #   label-logprob scoring -> paired log-loss, ECE, risk-coverage AURC
 upgrade-advisor probe-robust my_task.yaml --target ...    # robustness layer:
 #   typo/casing/filler/punct perturbations, gold unchanged
+
+# the complete decision memo (the format validated on 11 industry cases):
+upgrade-advisor dossier my_task.yaml --target ... --lang both
+#   -> dossier.md / dossier_zh.md: decision card, background, asset/cost
+#      tables, the FULL evidence table with plain-language readings, the
+#      executive brief, discussion, technical appendix. Narrative comes
+#      from the optional `case_background` / `case_notes` yaml keys.
+#      Render to Word: node scripts/render_dossier_docx.js dossier_zh.md out.docx
 ```
 
 Reports carry paired bootstrap CIs and exact McNemar p-values for every
