@@ -73,6 +73,11 @@ upgrade-advisor measure my_task.yaml --target Qwen/Qwen3-8B
 
 # 3. Get the recommendation + evidence report:
 upgrade-advisor recommend my_task.yaml --target Qwen/Qwen3-8B
+#    -> prints a plain-language decision card, writes recommendation.md
+#       (full statistics, for engineers) AND decision_brief.md +
+#       decision_brief_zh.md (for the budget owner: one-sentence verdict,
+#       errors per 100 requests, what was checked, next steps with costs
+#       -- same measured evidence, no statistics background needed)
 
 # 4. Before serving whatever you built — behavioral regression gate:
 upgrade-advisor gate my_task.yaml --candidate outputs/new_adapter

@@ -46,5 +46,3 @@
 - log GPU-minutes and labels consumed for this episode so the amortized decision improves with each release
 
 *Policy and margins from UpgradeBench (2026); validated over 33 measured upgrade episodes (0.37pp mean regret, zero regressions, split-half gating). Negative-flip rate follows Yan et al., Positive-Congruent Training, CVPR 2021. Scope: LoRA-class adapters, 1.5-8B open-weight models.*
-
-[report written to E:\eval project\cases\tripfun_travel\episodes\E__dataset__models__Qwen2.5-1.5B-Instruct\recommendation.md]

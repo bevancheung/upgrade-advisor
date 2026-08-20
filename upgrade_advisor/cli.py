@@ -427,8 +427,23 @@ def cmd_recommend(args):
     rpt = os.path.join(wd, "recommendation.md")
     with open(rpt, "w", encoding="utf-8") as f:
         f.write(out)
+    # executive briefs (review-3: the audience is often a budget owner, not
+    # an engineer) -- same evidence, plain language, both languages, always
+    from .exec_report import decision_card, render_exec
+    exec_paths = {}
+    for lang in ("en", "zh"):
+        ex = render_exec(c, args.target, ver, m, rec, lang=lang)
+        suffix = "" if lang == "en" else f"_{lang}"
+        p_ex = os.path.join(wd, f"decision_brief{suffix}.md")
+        with open(p_ex, "w", encoding="utf-8") as f:
+            f.write(ex)
+        exec_paths[lang] = p_ex
+    print(decision_card(rec, rec.evidence, lang="en"))
+    print()
     print(out)
-    print(f"\n[report written to {rpt}]")
+    print(f"\n[technical report: {rpt}]")
+    print(f"[decision brief (plain language): {exec_paths['en']}  |  "
+          f"中文版: {exec_paths['zh']}]")
 
 
 def cmd_retrain(args):
