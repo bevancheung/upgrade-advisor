@@ -10,7 +10,7 @@ amount of your data (a held-out test set, your current adapter, the candidate
 base); the tool measures what the decision needs, applies the policy the paper
 validated over 33 upgrade episodes (mean regret 0.37pp, zero behavioral
 regressions, at one third of always-retrain compute and labels), and emits one
-of four actions with the evidence attached:
+of six actions with the evidence attached:
 
 | Action | When the policy picks it |
 |---|---|
